@@ -1,0 +1,95 @@
+name: roughcut
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      BACKEND_INTERNAL_URL: http://backend:8000
+      NEXT_PUBLIC_APP_TITLE: ${NEXT_PUBLIC_APP_TITLE:-Roughcut}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      VIDEO_AGENT_DATABASE_PATH: ${VIDEO_AGENT_DATABASE_PATH:-/data/app.db}
+      VIDEO_AGENT_STORAGE_ROOT: ${VIDEO_AGENT_STORAGE_ROOT:-/data/projects}
+      VIDEO_AGENT_CONFIG_ROOT: ${VIDEO_AGENT_CONFIG_ROOT:-/data/config}
+      VIDEO_AGENT_LOGS_ROOT: ${VIDEO_AGENT_LOGS_ROOT:-/data/logs}
+      VIDEO_AGENT_DEFAULT_LLM_BASE_URL: ${VIDEO_AGENT_DEFAULT_LLM_BASE_URL:-}
+      VIDEO_AGENT_DEFAULT_LLM_MODEL: ${VIDEO_AGENT_DEFAULT_LLM_MODEL:-}
+      VIDEO_AGENT_DEFAULT_PRESET: ${VIDEO_AGENT_DEFAULT_PRESET:-talking_head_clean}
+      VIDEO_AGENT_DEFAULT_CUT_AGGRESSIVENESS: ${VIDEO_AGENT_DEFAULT_CUT_AGGRESSIVENESS:-balanced}
+      VIDEO_AGENT_DEFAULT_CAPTIONS_ENABLED: ${VIDEO_AGENT_DEFAULT_CAPTIONS_ENABLED:-true}
+      VIDEO_AGENT_DEFAULT_OUTPUT_QUALITY_PRESET: ${VIDEO_AGENT_DEFAULT_OUTPUT_QUALITY_PRESET:-balanced}
+      VIDEO_AGENT_WHISPER_MODEL: ${VIDEO_AGENT_WHISPER_MODEL:-small}
+      VIDEO_AGENT_WHISPER_DEVICE: ${VIDEO_AGENT_WHISPER_DEVICE:-cpu}
+      VIDEO_AGENT_WHISPER_COMPUTE_TYPE: ${VIDEO_AGENT_WHISPER_COMPUTE_TYPE:-int8}
+      VIDEO_AGENT_MAX_UPLOAD_SIZE_MB: ${VIDEO_AGENT_MAX_UPLOAD_SIZE_MB:-8192}
+      VIDEO_AGENT_WORKER_POLL_INTERVAL_SECONDS: ${VIDEO_AGENT_WORKER_POLL_INTERVAL_SECONDS:-2}
+      VIDEO_AGENT_LLM_REQUEST_TIMEOUT_SECONDS: ${VIDEO_AGENT_LLM_REQUEST_TIMEOUT_SECONDS:-180}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/data
+      - model-cache:/root/.cache
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      VIDEO_AGENT_DATABASE_PATH: ${VIDEO_AGENT_DATABASE_PATH:-/data/app.db}
+      VIDEO_AGENT_STORAGE_ROOT: ${VIDEO_AGENT_STORAGE_ROOT:-/data/projects}
+      VIDEO_AGENT_CONFIG_ROOT: ${VIDEO_AGENT_CONFIG_ROOT:-/data/config}
+      VIDEO_AGENT_LOGS_ROOT: ${VIDEO_AGENT_LOGS_ROOT:-/data/logs}
+      VIDEO_AGENT_DEFAULT_LLM_BASE_URL: ${VIDEO_AGENT_DEFAULT_LLM_BASE_URL:-}
+      VIDEO_AGENT_DEFAULT_LLM_MODEL: ${VIDEO_AGENT_DEFAULT_LLM_MODEL:-}
+      VIDEO_AGENT_DEFAULT_PRESET: ${VIDEO_AGENT_DEFAULT_PRESET:-talking_head_clean}
+      VIDEO_AGENT_DEFAULT_CUT_AGGRESSIVENESS: ${VIDEO_AGENT_DEFAULT_CUT_AGGRESSIVENESS:-balanced}
+      VIDEO_AGENT_DEFAULT_CAPTIONS_ENABLED: ${VIDEO_AGENT_DEFAULT_CAPTIONS_ENABLED:-true}
+      VIDEO_AGENT_DEFAULT_OUTPUT_QUALITY_PRESET: ${VIDEO_AGENT_DEFAULT_OUTPUT_QUALITY_PRESET:-balanced}
+      VIDEO_AGENT_WHISPER_MODEL: ${VIDEO_AGENT_WHISPER_MODEL:-small}
+      VIDEO_AGENT_WHISPER_DEVICE: ${VIDEO_AGENT_WHISPER_DEVICE:-cpu}
+      VIDEO_AGENT_WHISPER_COMPUTE_TYPE: ${VIDEO_AGENT_WHISPER_COMPUTE_TYPE:-int8}
+      VIDEO_AGENT_MAX_UPLOAD_SIZE_MB: ${VIDEO_AGENT_MAX_UPLOAD_SIZE_MB:-8192}
+      VIDEO_AGENT_WORKER_POLL_INTERVAL_SECONDS: ${VIDEO_AGENT_WORKER_POLL_INTERVAL_SECONDS:-2}
+      VIDEO_AGENT_LLM_REQUEST_TIMEOUT_SECONDS: ${VIDEO_AGENT_LLM_REQUEST_TIMEOUT_SECONDS:-180}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/data
+      - model-cache:/root/.cache
+    depends_on:
+      backend:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+
+volumes:
+  model-cache:
+

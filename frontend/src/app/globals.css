@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 42 35% 97%;
+    --foreground: 28 19% 18%;
+    --card: 0 0% 100%;
+    --card-foreground: 28 19% 18%;
+    --muted: 36 23% 92%;
+    --muted-foreground: 24 10% 41%;
+    --accent: 101 17% 87%;
+    --accent-foreground: 28 19% 18%;
+    --border: 30 19% 85%;
+    --input: 30 19% 85%;
+    --ring: 28 31% 30%;
+    --primary: 28 31% 24%;
+    --primary-foreground: 42 35% 97%;
+    --secondary: 42 26% 94%;
+    --secondary-foreground: 28 19% 18%;
+    --destructive: 356 70% 56%;
+    --destructive-foreground: 0 0% 98%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    background-image:
+      radial-gradient(circle at top left, rgba(196, 214, 193, 0.35), transparent 26%),
+      radial-gradient(circle at top right, rgba(233, 214, 192, 0.38), transparent 22%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0));
+    min-height: 100vh;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    @apply outline-none;
+  }
+
+  ::selection {
+    background: rgba(124, 146, 110, 0.22);
+  }
+}
+
+@layer utilities {
+  .surface-grid {
+    @apply grid gap-5 lg:gap-6;
+  }
+
+  .panel-label {
+    @apply text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground;
+  }
+}
+
