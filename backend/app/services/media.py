@@ -64,9 +64,16 @@ def transcript_text(segments: list[TranscriptSegment]) -> str:
     return " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
 
 
+def transcript_text_lines(segments: list[TranscriptSegment]) -> str:
+    return "\n".join(
+        f"[{segment.start:0.2f}-{segment.end:0.2f}] {text}"
+        for segment in segments
+        if (text := segment.text.strip())
+    )
+
+
 def write_transcript_text(path: Path, segments: list[TranscriptSegment]) -> None:
-    lines = [f"[{segment.start:0.2f}-{segment.end:0.2f}] {segment.text.strip()}" for segment in segments]
-    path.write_text("\n".join(lines))
+    path.write_text(transcript_text_lines(segments))
 
 
 def _format_srt_timestamp(value: float) -> str:
@@ -86,6 +93,9 @@ def remap_segments_to_keep_ranges(
     for keep_range in keep_ranges:
         keep_duration = keep_range.end - keep_range.start
         for segment in segments:
+            text = segment.text.strip()
+            if not text:
+                continue
             overlap_start = max(segment.start, keep_range.start)
             overlap_end = min(segment.end, keep_range.end)
             if overlap_end <= overlap_start:
@@ -96,7 +106,7 @@ def remap_segments_to_keep_ranges(
                 SubtitleSegment(
                     start=round(mapped_start, 3),
                     end=round(mapped_end, 3),
-                    text=segment.text.strip(),
+                    text=text,
                 )
             )
         output_cursor += keep_duration
@@ -116,6 +126,19 @@ def write_srt(path: Path, segments: list[SubtitleSegment]) -> None:
             )
         )
     path.write_text("\n\n".join(blocks))
+
+
+def artifact_file_has_content(path: Path | None) -> bool:
+    if path is None:
+        return False
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def subtitle_file_is_usable(path: Path | None) -> bool:
+    return artifact_file_has_content(path)
 
 
 def _quality_args(quality_preset: str) -> tuple[str, str]:
@@ -177,7 +200,7 @@ def render_rough_cut(
         audio_label = "[basea]"
 
     final_video_label = video_label
-    if captions_path is not None and captions_path.exists():
+    if subtitle_file_is_usable(captions_path):
         filter_parts.append(
             f"{video_label}subtitles={captions_path.as_posix()}:force_style='FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF&,OutlineColour=&H003D3128&,BorderStyle=1,Outline=1,Shadow=0,MarginV=32'[vout]"
         )
@@ -213,4 +236,3 @@ def render_rough_cut(
         ]
     )
     _run(args)
-
