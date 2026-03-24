@@ -98,9 +98,11 @@ def normalize_edit_plan(
     source_file: str,
     preset: PresetConfig,
     source_duration: float,
+    source_mode: str,
     captions_enabled: bool,
     generate_shorts: bool,
 ) -> EditPlan:
+    audio_only = source_mode == "audio-only"
     normalized_keep: list[EditRange] = []
     for item in sorted(raw_plan.keep_ranges, key=lambda segment: segment.start):
         start = round(_clamp(item.start, 0.0, source_duration), 3)
@@ -126,11 +128,11 @@ def normalize_edit_plan(
         silence_removed_summary=raw_plan.silence_removed_summary.strip(),
         filler_removed_summary=raw_plan.filler_removed_summary.strip(),
         caption_strategy={
-            "enabled": captions_enabled and raw_plan.caption_strategy.enabled,
+            "enabled": (not audio_only) and captions_enabled and raw_plan.caption_strategy.enabled,
             "style": raw_plan.caption_strategy.style,
         },
         subtitle_segments=raw_plan.subtitle_segments,
-        zoom_events=raw_plan.zoom_events,
+        zoom_events=[] if audio_only else raw_plan.zoom_events,
         shorts_candidates=raw_plan.shorts_candidates if generate_shorts else [],
         notes_for_user=raw_plan.notes_for_user,
     )
@@ -226,6 +228,7 @@ def create_edit_plan(
     source_duration: float,
     preset: PresetConfig,
     transcript: TranscriptArtifact,
+    source_mode: str,
     aggressiveness: str,
     captions_enabled: bool,
     generate_shorts: bool,
@@ -249,6 +252,7 @@ def create_edit_plan(
 
 Source file: {source_filename}
 Source duration (seconds): {source_duration}
+Source mode: {source_mode}
 Preset:
 {json.dumps(preset.model_dump(), indent=2)}
 
@@ -267,6 +271,7 @@ Requirements:
 - Prefer a premium YouTube pacing, not hyperactive jump cuts.
 - Keep ranges must be chronological and non-overlapping.
 - Use source timestamps, not output timestamps.
+- If source mode is audio-only, do not emit zoom events and keep caption_strategy.enabled false.
 - If unsure, preserve more than you cut.
 
 JSON schema:
@@ -299,7 +304,7 @@ JSON schema:
             preset=preset,
             source_duration=source_duration,
             transcript_summary=str(sanitized_payload.get("transcript_summary") or "").strip(),
-            captions_enabled=captions_enabled,
+            captions_enabled=captions_enabled and source_mode != "audio-only",
             keep_reason="Planner fallback; preserved full clip",
             note_for_user="Planner output was malformed after sanitization. Generated a conservative no-cut plan.",
         )
@@ -307,13 +312,14 @@ JSON schema:
     raw_plan = EditPlan.model_validate(sanitized_payload)
     try:
         return normalize_edit_plan(
-            raw_plan=raw_plan,
-            source_file=source_filename,
-            preset=preset,
-            source_duration=source_duration,
-            captions_enabled=captions_enabled,
-            generate_shorts=generate_shorts,
-        )
+        raw_plan=raw_plan,
+        source_file=source_filename,
+        preset=preset,
+        source_duration=source_duration,
+        source_mode=source_mode,
+        captions_enabled=captions_enabled,
+        generate_shorts=generate_shorts,
+    )
     except RuntimeError:
         _append_log(
             log_messages,
@@ -324,7 +330,7 @@ JSON schema:
             preset=preset,
             source_duration=source_duration,
             transcript_summary=raw_plan.transcript_summary.strip(),
-            captions_enabled=captions_enabled,
+            captions_enabled=captions_enabled and source_mode != "audio-only",
             keep_reason="Planner fallback; preserved full clip",
             note_for_user="Planner output was malformed after sanitization. Generated a conservative no-cut plan.",
         )

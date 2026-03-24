@@ -87,11 +87,14 @@ def _serialize_file(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _serialize_job(row: sqlite3.Row) -> dict[str, Any]:
+    payload = _json_loads(row["payload_json"]) if row["payload_json"] else {}
     result_payload = _json_loads(row["result_json"]) if row["result_json"] else None
     return {
         "id": row["id"],
         "project_id": row["project_id"],
         "source_file_id": row["source_file_id"],
+        "input_type": payload.get("input_type"),
+        "job_mode": payload.get("job_mode"),
         "kind": row["kind"],
         "status": row["status"],
         "preset_id": row["preset_id"],
@@ -103,7 +106,7 @@ def _serialize_job(row: sqlite3.Row) -> dict[str, Any]:
         "progress_message": row["progress_message"],
         "progress_percent": row["progress_percent"],
         "error_message": row["error_message"],
-        "payload": _json_loads(row["payload_json"]) if row["payload_json"] else {},
+        "payload": payload,
         "result": JobResult.model_validate(result_payload) if result_payload else None,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -371,6 +374,21 @@ def update_job_progress(
     return job
 
 
+def update_job_payload(conn: sqlite3.Connection, job_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    job = get_job(conn, job_id)
+    if job is None:
+        return None
+
+    payload = dict(job["payload"])
+    payload.update(updates)
+    conn.execute(
+        "UPDATE jobs SET payload_json = ?, updated_at = ? WHERE id = ?",
+        (_json_dumps(payload), utc_now(), job_id),
+    )
+    _touch_project(conn, job["project_id"])
+    return get_job(conn, job_id)
+
+
 def complete_job(conn: sqlite3.Connection, job_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
     now = utc_now()
     conn.execute(
@@ -483,4 +501,3 @@ def update_settings(conn: sqlite3.Connection, settings: Settings, payload: dict[
             (key, _json_dumps(value), now),
         )
     return get_effective_settings(conn, settings)
-

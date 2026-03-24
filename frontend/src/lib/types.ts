@@ -46,6 +46,8 @@ export interface JobSummary {
   id: string;
   project_id: string;
   source_file_id: string;
+  input_type: "video" | "audio-only" | null;
+  job_mode: "video" | "audio-only" | null;
   kind: string;
   status: JobStatus;
   preset_id: string;
@@ -130,4 +132,3 @@ export interface JobCreateRequest {
   generate_shorts: boolean;
   user_notes?: string;
 }
-

@@ -211,7 +211,29 @@ def process_job(settings: Settings, job_id: str) -> None:
         duration = probe.get("duration_seconds")
         if not duration:
             raise RuntimeError("Could not determine media duration from ffprobe.")
+        job_mode = media.source_mode_from_probe(probe)
+        input_type = job_mode
+        with connection() as conn:
+            repository.update_job_payload(
+                conn,
+                job_id,
+                {
+                    "input_type": input_type,
+                    "job_mode": job_mode,
+                },
+            )
         _log_line(log_lines, f"Source duration detected: {duration:.2f}s.")
+        if job_mode == "audio-only":
+            _log_line(
+                log_lines,
+                "Source detected as audio-only. Using audio-only mode; video-specific planner features and burned-in subtitles are disabled.",
+            )
+        else:
+            _log_line(log_lines, "Source detected as video. Using video mode.")
+
+        effective_captions_enabled = bool(job["captions_enabled"]) and job_mode == "video"
+        if job["captions_enabled"] and not effective_captions_enabled:
+            _log_line(log_lines, "Audio-only mode disables burned-in video subtitles for this job.")
 
         with connection() as conn:
             repository.update_job_progress(
@@ -227,7 +249,7 @@ def process_job(settings: Settings, job_id: str) -> None:
             _log_line(log_lines, "Transcription produced zero segments.")
             _log_line(
                 log_lines,
-                "Transcript contained no segments. The planner may still return keep ranges from source duration and preset guidance.",
+                "Transcript contained no segments. Roughcut will use a conservative fallback plan instead of a transcript-driven edit plan.",
             )
 
         transcript_json_path = outputs_dir / "transcript.json"
@@ -265,7 +287,11 @@ def process_job(settings: Settings, job_id: str) -> None:
                 progress_message=(
                     "No speech detected; using a conservative fallback plan."
                     if not transcript.segments
-                    else "Generating a structured edit plan with the local model."
+                    else (
+                        "Planning the rough cut in audio-only mode with the local model."
+                        if job_mode == "audio-only"
+                        else "Generating a structured edit plan with the local model."
+                    )
                 ),
                 progress_percent=50,
             )
@@ -279,8 +305,9 @@ def process_job(settings: Settings, job_id: str) -> None:
             source_duration=float(duration),
             preset=preset,
             transcript=transcript,
+            source_mode=job_mode,
             aggressiveness=job["aggressiveness"],
-            captions_enabled=job["captions_enabled"],
+            captions_enabled=effective_captions_enabled,
             generate_shorts=job["generate_shorts"],
             user_notes=job["user_notes"],
             log_messages=planner_messages,
@@ -326,7 +353,11 @@ def process_job(settings: Settings, job_id: str) -> None:
                 conn,
                 job_id,
                 current_step="rendering",
-                progress_message="Rendering the rough cut with ffmpeg.",
+                progress_message=(
+                    "Rendering the rough cut in audio-only mode with ffmpeg."
+                    if job_mode == "audio-only"
+                    else "Rendering the rough cut with ffmpeg."
+                ),
                 progress_percent=75,
             )
 

@@ -61,6 +61,8 @@ class JobSummary(BaseModel):
     id: str
     project_id: str
     source_file_id: str
+    input_type: Literal["video", "audio-only"] | None = None
+    job_mode: Literal["video", "audio-only"] | None = None
     kind: str
     status: Literal["queued", "running", "completed", "failed", "canceled"]
     preset_id: str
@@ -261,4 +263,3 @@ class TranscriptArtifact(BaseModel):
     language: str | None = None
     language_probability: float | None = None
     segments: list[TranscriptSegment] = Field(default_factory=list)
-

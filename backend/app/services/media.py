@@ -48,6 +48,7 @@ def probe_media(settings: Settings, media_path: Path) -> dict[str, Any]:
     return {
         "has_video": video_stream is not None,
         "has_audio": audio_stream is not None,
+        "source_mode": "video" if video_stream is not None else ("audio-only" if audio_stream is not None else None),
         "duration_seconds": float(duration) if duration else None,
         "width": video_stream.get("width") if video_stream else None,
         "height": video_stream.get("height") if video_stream else None,
@@ -58,6 +59,14 @@ def probe_media(settings: Settings, media_path: Path) -> dict[str, Any]:
         "format_name": format_info.get("format_name"),
         "bit_rate": int(format_info["bit_rate"]) if format_info.get("bit_rate") else None,
     }
+
+
+def source_mode_from_probe(probe: dict[str, Any]) -> str:
+    if probe.get("has_video"):
+        return "video"
+    if probe.get("has_audio"):
+        return "audio-only"
+    raise RuntimeError("Source file has no renderable audio or video streams.")
 
 
 def transcript_text(segments: list[TranscriptSegment]) -> str:
@@ -200,7 +209,7 @@ def render_rough_cut(
         audio_label = "[basea]"
 
     final_video_label = video_label
-    if subtitle_file_is_usable(captions_path):
+    if has_video and subtitle_file_is_usable(captions_path):
         filter_parts.append(
             f"{video_label}subtitles={captions_path.as_posix()}:force_style='FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF&,OutlineColour=&H003D3128&,BorderStyle=1,Outline=1,Shadow=0,MarginV=32'[vout]"
         )

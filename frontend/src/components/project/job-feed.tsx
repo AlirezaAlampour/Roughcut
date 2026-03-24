@@ -42,6 +42,16 @@ export function JobFeed({ jobs, files, onCancel }: JobFeedProps) {
                       <StatusBadge status={job.status} />
                       <p className="text-sm font-medium text-foreground">{titleizeSlug(job.preset_id)}</p>
                     </div>
+                    {job.input_type || job.job_mode ? (
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                        {job.input_type ? (
+                          <span>{job.input_type === "audio-only" ? "Audio-only input" : "Video input"}</span>
+                        ) : null}
+                        {job.job_mode ? (
+                          <span>{job.job_mode === "audio-only" ? "Audio-only mode" : "Video mode"}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <p className="mt-2 text-sm text-muted-foreground">
                       {job.progress_message || "Queued"} · {formatDateTime(job.created_at)}
                     </p>
@@ -108,4 +118,3 @@ export function JobFeed({ jobs, files, onCancel }: JobFeedProps) {
     </Card>
   );
 }
-
