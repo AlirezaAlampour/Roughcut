@@ -98,8 +98,13 @@ outputs/<job-id>/
 ├─ transcript.json
 ├─ transcript.txt
 ├─ candidates.json
+├─ trace.jsonl
+├─ planner-prompt.txt
+├─ planner-response.json
 └─ job.log
 ```
+
+If the planner response cannot be parsed as JSON, Roughcut saves `planner-response.txt` instead.
 
 Candidate export jobs write:
 
@@ -108,17 +113,24 @@ outputs/<export-job-id>/<candidate-id>/
 ├─ clip.mp4
 ├─ captions.srt
 ├─ captions.vtt
+├─ captions.ass
 ├─ candidate.json
+├─ render-command.txt
+├─ trace.jsonl
 ├─ thumbnail.jpg
 └─ job.log
 ```
 
-The MP4 export uses a simple 9:16 strategy:
+`trace.jsonl` is a structured per-job activity log with timestamp, stage, event, severity, message, and optional payload fields. The project run view includes an Activity trace panel that reads the same trace and exposes planner/render artifacts collapsed by default.
 
-- centered crop when the source aspect is suitable
-- blurred background with centered foreground for narrow sources
+The default short export uses a centered blur-fill strategy:
+
+- blurred full-frame duplicate background
+- centered original foreground content
 - neutral vertical background for audio-only sources
-- one clean burned-caption style when captions are enabled
+- burned ASS captions with active word highlighting when word timings are available
+
+The older crop-oriented `vertical_9_16` mode and `source_aspect` mode remain available through presets.
 
 There is no face tracking in v1.
 
@@ -139,6 +151,8 @@ Presets influence:
 - planner scoring weights
 - caption behavior
 - export mode
+- caption active-word color and vertical placement
+- blur intensity
 - planner hint
 
 You can override presets with:
@@ -169,6 +183,7 @@ Main runtime variables in `.env.example`:
 | `VIDEO_AGENT_DEFAULT_CUT_AGGRESSIVENESS` | default candidate density | `balanced` |
 | `VIDEO_AGENT_DEFAULT_CAPTIONS_ENABLED` | burned captions default | `true` |
 | `VIDEO_AGENT_DEFAULT_OUTPUT_QUALITY_PRESET` | ffmpeg quality preset | `balanced` |
+| `VIDEO_AGENT_ENABLE_DETAILED_PLANNER_LOGGING` | save planner prompt/response artifacts | `true` |
 | `VIDEO_AGENT_WHISPER_MODEL` | faster-whisper model size | `small` |
 | `VIDEO_AGENT_WHISPER_DEVICE` | transcription device | `cpu` |
 | `VIDEO_AGENT_WHISPER_COMPUTE_TYPE` | whisper compute type | `int8` |

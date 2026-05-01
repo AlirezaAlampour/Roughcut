@@ -53,6 +53,10 @@ class JobResult(BaseModel):
     edit_plan_file_id: str | None = None
     candidate_manifest_file_id: str | None = None
     log_file_id: str | None = None
+    trace_file_id: str | None = None
+    planner_prompt_file_id: str | None = None
+    planner_response_file_id: str | None = None
+    render_command_file_id: str | None = None
     notes_for_user: list[str] = Field(default_factory=list)
     transcript_preview: str | None = None
     plan: dict[str, Any] | None = None
@@ -145,6 +149,7 @@ class SettingsResponse(BaseModel):
     cut_aggressiveness: Literal["conservative", "balanced", "aggressive"]
     captions_enabled: bool
     output_quality_preset: Literal["draft", "balanced", "quality"]
+    enable_detailed_planner_logging: bool
     project_storage_root: str
     transcription_model: str
 
@@ -158,6 +163,7 @@ class SettingsUpdateRequest(BaseModel):
     cut_aggressiveness: Literal["conservative", "balanced", "aggressive"] | None = None
     captions_enabled: bool | None = None
     output_quality_preset: Literal["draft", "balanced", "quality"] | None = None
+    enable_detailed_planner_logging: bool | None = None
 
 
 class PresetConfig(BaseModel):
@@ -180,7 +186,13 @@ class PresetConfig(BaseModel):
     max_candidates: int = 12
     scoring_weights: dict[str, float] = Field(default_factory=dict)
     caption_behavior: str = "burned_in_default"
-    export_mode: Literal["vertical_9_16", "source_aspect"] = "vertical_9_16"
+    export_mode: Literal["center_blur_fill", "vertical_9_16", "source_aspect"] = "center_blur_fill"
+    caption_base_color: str = "#FFFFFF"
+    caption_active_word_color: str = "#FFE15D"
+    caption_vertical_position: Literal["lower", "lower_middle"] = "lower"
+    caption_max_lines: int = 2
+    caption_max_words_per_line: int = 4
+    blur_intensity: float = 30.0
 
 
 class PresetsResponse(BaseModel):
@@ -233,6 +245,7 @@ class SubtitleSegment(BaseModel):
     start: float
     end: float
     text: str
+    words: list[WordTimestamp] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_range(self) -> "SubtitleSegment":
@@ -308,6 +321,21 @@ class CandidateExportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     captions_enabled: bool | None = None
+
+
+class TraceEvent(BaseModel):
+    timestamp: str
+    stage: str
+    event: str
+    message: str
+    severity: Literal["debug", "info", "warning", "error"] = "info"
+    payload: dict[str, Any] | None = None
+
+
+class JobTraceResponse(BaseModel):
+    job_id: str
+    events: list[TraceEvent] = Field(default_factory=list)
+    artifacts: dict[str, str] = Field(default_factory=dict)
 
 
 class ZoomEvent(BaseModel):

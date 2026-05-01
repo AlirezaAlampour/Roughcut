@@ -26,7 +26,13 @@
         "niche_relevance": 1.05
       },
       "caption_behavior": "burned_in_default",
-      "export_mode": "vertical_9_16"
+      "export_mode": "center_blur_fill",
+      "caption_base_color": "#FFFFFF",
+      "caption_active_word_color": "#FFE15D",
+      "caption_vertical_position": "lower",
+      "caption_max_lines": 2,
+      "caption_max_words_per_line": 4,
+      "blur_intensity": 30
     }
   ]
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from app.config import Settings
@@ -66,6 +67,36 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
 def _append_log(log_messages: list[str] | None, message: str) -> None:
     if log_messages is not None:
         log_messages.append(message)
+
+
+def _write_text_artifact(path: Path, content: str) -> None:
+    path.write_text(content)
+
+
+def _write_planner_prompt_artifact(artifact_dir: Path | None, *, system_prompt: str, user_prompt: str) -> None:
+    if artifact_dir is None:
+        return
+    _write_text_artifact(
+        artifact_dir / "planner-prompt.txt",
+        f"System prompt:\n{system_prompt.strip()}\n\nUser prompt:\n{user_prompt.strip()}\n",
+    )
+
+
+def _write_planner_response_artifact(
+    artifact_dir: Path | None,
+    *,
+    response_text: str,
+    parsed_payload: dict[str, Any] | None,
+) -> None:
+    if artifact_dir is None:
+        return
+    if parsed_payload is not None:
+        (artifact_dir / "planner-response.json").write_text(json.dumps(parsed_payload, indent=2))
+        response_text_path = artifact_dir / "planner-response.txt"
+        if response_text_path.exists():
+            response_text_path.unlink(missing_ok=True)
+        return
+    _write_text_artifact(artifact_dir / "planner-response.txt", response_text)
 
 
 def build_conservative_fallback_plan(
@@ -261,6 +292,7 @@ def create_edit_plan(
     generate_shorts: bool,
     user_notes: str | None,
     log_messages: list[str] | None = None,
+    artifact_dir: Path | None = None,
 ) -> EditPlan:
     if not transcript.segments:
         _append_log(log_messages, "Zero-transcript fallback engaged. Skipping planner generation and using a conservative full-keep plan.")
@@ -305,6 +337,11 @@ JSON schema:
 {schema}
 """
 
+    _write_planner_prompt_artifact(
+        artifact_dir,
+        system_prompt=PLANNER_SYSTEM_PROMPT,
+        user_prompt=prompt,
+    )
     response_text = llm.request_planner_completion(
         base_url=llm_base_url,
         model=llm_model,
@@ -312,7 +349,12 @@ JSON schema:
         user_prompt=prompt,
         timeout_seconds=settings.llm_request_timeout_seconds,
     )
-    raw_payload = json.loads(_extract_json_blob(response_text))
+    try:
+        raw_payload = json.loads(_extract_json_blob(response_text))
+    except Exception:
+        _write_planner_response_artifact(artifact_dir, response_text=response_text, parsed_payload=None)
+        raise
+    _write_planner_response_artifact(artifact_dir, response_text=response_text, parsed_payload=raw_payload)
     sanitized_payload = _sanitize_plan_payload(
         payload=raw_payload,
         source_file=source_filename,
@@ -452,6 +494,7 @@ def score_short_candidates(
     candidates: list[CandidateClip],
     user_notes: str | None,
     log_messages: list[str] | None = None,
+    artifact_dir: Path | None = None,
 ) -> list[CandidateClip]:
     if not candidates:
         return []
@@ -493,6 +536,11 @@ JSON schema:
 {schema}
 """
 
+    _write_planner_prompt_artifact(
+        artifact_dir,
+        system_prompt=SHORTS_SCORING_SYSTEM_PROMPT,
+        user_prompt=prompt,
+    )
     response_text = llm.request_planner_completion(
         base_url=llm_base_url,
         model=llm_model,
@@ -500,7 +548,12 @@ JSON schema:
         user_prompt=prompt,
         timeout_seconds=settings.llm_request_timeout_seconds,
     )
-    raw_payload = json.loads(_extract_json_blob(response_text))
+    try:
+        raw_payload = json.loads(_extract_json_blob(response_text))
+    except Exception:
+        _write_planner_response_artifact(artifact_dir, response_text=response_text, parsed_payload=None)
+        raise
+    _write_planner_response_artifact(artifact_dir, response_text=response_text, parsed_payload=raw_payload)
     scoring_result = CandidateScoringResult.model_validate(raw_payload)
     scored_candidates = normalize_scored_candidates(
         candidates=candidates,

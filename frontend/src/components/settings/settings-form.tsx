@@ -42,7 +42,8 @@ export function SettingsForm({
         default_preset: values.default_preset,
         cut_aggressiveness: values.cut_aggressiveness,
         captions_enabled: values.captions_enabled,
-        output_quality_preset: values.output_quality_preset
+        output_quality_preset: values.output_quality_preset,
+        enable_detailed_planner_logging: values.enable_detailed_planner_logging
       };
       const updated = await api.updateSettings(payload);
       setValues(updated);
@@ -153,6 +154,20 @@ export function SettingsForm({
             <div className="space-y-2">
               <Label>Transcription model</Label>
               <Input value={values.transcription_model} readOnly />
+            </div>
+            <div className="rounded-[22px] border border-border/70 bg-white/70 p-4 lg:col-span-2">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <Label>Detailed planner logging</Label>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Saves planner prompts and responses next to the structured trace for local debugging.
+                  </p>
+                </div>
+                <Switch
+                  checked={values.enable_detailed_planner_logging}
+                  onCheckedChange={(checked) => update("enable_detailed_planner_logging", checked)}
+                />
+              </div>
             </div>
           </div>
         </details>

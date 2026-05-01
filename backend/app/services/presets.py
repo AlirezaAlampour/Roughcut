@@ -25,6 +25,7 @@ DEFAULT_PRESETS = [
         target_clip_ideal_sec=48,
         candidate_overlap_sec=6,
         max_candidates=12,
+        export_mode="center_blur_fill",
         scoring_weights={
             "hook_strength": 1.25,
             "self_containedness": 1.15,
@@ -51,6 +52,7 @@ DEFAULT_PRESETS = [
         target_clip_ideal_sec=35,
         candidate_overlap_sec=5,
         max_candidates=14,
+        export_mode="center_blur_fill",
         scoring_weights={
             "hook_strength": 1.45,
             "conflict_tension": 1.35,
@@ -76,6 +78,7 @@ DEFAULT_PRESETS = [
         target_clip_ideal_sec=45,
         candidate_overlap_sec=6,
         max_candidates=12,
+        export_mode="center_blur_fill",
         scoring_weights={
             "self_containedness": 1.3,
             "payoff_clarity": 1.35,
@@ -101,6 +104,7 @@ DEFAULT_PRESETS = [
         target_clip_ideal_sec=55,
         candidate_overlap_sec=8,
         max_candidates=10,
+        export_mode="center_blur_fill",
         scoring_weights={
             "novelty_interestingness": 1.2,
             "niche_relevance": 1.3,

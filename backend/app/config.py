@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     default_cut_aggressiveness: str = "balanced"
     default_captions_enabled: bool = True
     default_output_quality_preset: str = "balanced"
+    enable_detailed_planner_logging: bool = True
 
     whisper_model: str = "small"
     whisper_device: str = "cpu"

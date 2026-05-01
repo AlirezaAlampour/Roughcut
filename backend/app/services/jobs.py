@@ -17,13 +17,28 @@ from app.schemas import (
     SubtitleSegment,
     TranscriptSegment,
 )
-from app.services import candidates, media, planner, presets, repository, storage, transcription
+from app.services import candidates, media, planner, presets, repository, storage, tracing, transcription
 from app.utils.serialization import make_json_safe
 
 
 def _log_line(lines: list[str], message: str) -> None:
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     lines.append(f"{timestamp} {message}")
+
+
+def _log_and_trace(
+    lines: list[str],
+    trace: tracing.JobTrace | None,
+    *,
+    stage: str,
+    event: str,
+    message: str,
+    severity: str = "info",
+    payload: dict | None = None,
+) -> None:
+    _log_line(lines, message)
+    if trace is not None:
+        trace.emit(stage=stage, event=event, message=message, severity=severity, payload=payload)
 
 
 def _store_generated_file(
@@ -61,6 +76,28 @@ def _store_generated_file(
         width=width,
         height=height,
         metadata=metadata,
+    )
+
+
+def _store_generated_file_if_exists(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    *,
+    project_id: str,
+    relative_path: str,
+    role: str,
+    metadata_extra: dict | None = None,
+) -> dict | None:
+    full_path = storage.resolve_project_relative_path(settings, project_id, relative_path)
+    if not media.artifact_file_has_content(full_path):
+        return None
+    return _store_generated_file(
+        conn,
+        settings,
+        project_id=project_id,
+        relative_path=relative_path,
+        role=role,
+        metadata_extra=metadata_extra,
     )
 
 
@@ -187,6 +224,7 @@ def _fail_job_with_log(
     project_id: str,
     outputs_dir: Path | None,
     log_relative_path: str | None,
+    trace_relative_path: str | None = None,
     log_lines: list[str],
     message: str,
 ) -> None:
@@ -209,6 +247,14 @@ def _fail_job_with_log(
                         relative_path=log_relative_path,
                         role="log",
                     )
+                    if trace_relative_path:
+                        _store_generated_file_if_exists(
+                            conn,
+                            settings,
+                            project_id=project_id,
+                            relative_path=trace_relative_path,
+                            role="trace_jsonl",
+                        )
             except Exception:
                 pass
             storage.sync_project_manifest(conn, settings, project_id)
@@ -246,6 +292,8 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
     project_id = ""
     outputs_dir: Path | None = None
     log_relative_path: str | None = None
+    trace_relative_path: str | None = None
+    trace: tracing.JobTrace | None = None
 
     try:
         job, source_file, preset = _load_job_source_and_preset(settings, job_id)
@@ -256,9 +304,22 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
         outputs_dir = storage.outputs_root(settings, project_id) / job_id
         outputs_dir.mkdir(parents=True, exist_ok=True)
         log_relative_path = f"outputs/{job_id}/job.log"
+        trace_relative_path = f"outputs/{job_id}/trace.jsonl"
+        trace = tracing.JobTrace(outputs_dir)
         source_path = storage.resolve_project_relative_path(settings, project_id, source_file["relative_path"])
 
-        _log_line(log_lines, f"Starting shorts candidate generation job {job_id} for source {source_file['name']}.")
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="job",
+            event="started",
+            message=f"Starting shorts candidate generation job {job_id} for source {source_file['name']}.",
+            payload={
+                "job_id": job_id,
+                "source_file": source_file["name"],
+                "preset_id": job["preset_id"],
+            },
+        )
         with connection() as conn:
             repository.update_job_progress(
                 conn,
@@ -268,6 +329,14 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                 progress_percent=10,
             )
 
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="probe",
+            event="started",
+            message="Inspecting source media with ffprobe.",
+            payload={"source_path": source_file["relative_path"]},
+        )
         probe = media.probe_media(settings, source_path)
         duration = probe.get("duration_seconds")
         if not duration:
@@ -283,14 +352,32 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                     "job_mode": job_mode,
                 },
             )
-        _log_line(log_lines, f"Source duration detected: {duration:.2f}s.")
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="probe",
+            event="completed",
+            message=f"Source duration detected: {duration:.2f}s.",
+            payload=probe,
+        )
         if job_mode == "audio-only":
-            _log_line(
+            _log_and_trace(
                 log_lines,
-                "Source detected as audio-only. Candidate metadata can be generated, but vertical video export will use a neutral background.",
+                trace,
+                stage="probe",
+                event="source_mode",
+                message="Source detected as audio-only. Candidate metadata can be generated, but vertical video export will use a neutral background.",
+                payload={"job_mode": job_mode},
             )
         else:
-            _log_line(log_lines, "Source detected as video. Using video mode.")
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage="probe",
+                event="source_mode",
+                message="Source detected as video. Using video mode.",
+                payload={"job_mode": job_mode},
+            )
 
         with connection() as conn:
             repository.update_job_progress(
@@ -300,22 +387,67 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                 progress_message="Creating transcript with faster-whisper.",
                 progress_percent=25,
             )
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="transcription",
+            event="started",
+            message="Creating transcript with faster-whisper.",
+            payload={"model": settings.whisper_model},
+        )
         transcript = transcription.transcribe_media(settings, source_path)
-        _log_line(log_lines, f"Transcribed {len(transcript.segments)} segments.")
+        word_count = sum(len(segment.words) for segment in transcript.segments)
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="transcription",
+            event="completed",
+            message=f"Transcribed {len(transcript.segments)} segments.",
+            payload={
+                "segment_count": len(transcript.segments),
+                "word_count": word_count,
+                "language": transcript.language,
+                "language_probability": transcript.language_probability,
+            },
+        )
         if not transcript.segments:
-            _log_line(log_lines, "Transcription produced zero segments.")
-            _log_line(
+            _log_and_trace(
                 log_lines,
-                "Transcript contained no segments. Roughcut will not ask the planner to score shorts candidates.",
+                trace,
+                stage="transcription",
+                event="empty",
+                message="Transcription produced zero segments.",
+                severity="warning",
+            )
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage="planner scoring",
+                event="skipped",
+                message="Transcript contained no segments. Roughcut will not ask the planner to score shorts candidates.",
+                severity="warning",
             )
 
         transcript_json_path = outputs_dir / "transcript.json"
         _write_json(transcript_json_path, transcript.model_dump())
+        trace.emit(
+            stage="artifact write",
+            event="transcript_json_written",
+            message="Wrote transcript.json.",
+            payload={"relative_path": f"outputs/{job_id}/transcript.json"},
+        )
         transcript_txt_path = _prepare_transcript_text_file(
             outputs_dir=outputs_dir,
             transcript_segments=transcript.segments,
             log_lines=log_lines,
         )
+        if transcript_txt_path is not None:
+            trace.emit(
+                stage="artifact write",
+                event="transcript_text_written",
+                message="Wrote transcript.txt.",
+                payload={"relative_path": f"outputs/{job_id}/transcript.txt"},
+            )
 
         with connection() as conn:
             transcript_json_file = _store_generated_file(
@@ -345,13 +477,32 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                 progress_percent=50,
             )
 
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="segmentation",
+            event="started",
+            message="Splitting the transcript into shorts candidate windows.",
+            payload={
+                "target_clip_min_sec": preset.target_clip_min_sec,
+                "target_clip_max_sec": preset.target_clip_max_sec,
+                "max_candidates": preset.max_candidates,
+            },
+        )
         candidate_windows = candidates.segment_transcript_into_candidates(
             transcript,
             preset=preset,
             source_duration=float(duration),
             aggressiveness=job["aggressiveness"],
         )
-        _log_line(log_lines, f"Deterministic pre-segmentation produced {len(candidate_windows)} candidate windows.")
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="segmentation",
+            event="completed",
+            message=f"Deterministic pre-segmentation produced {len(candidate_windows)} candidate windows.",
+            payload={"candidate_count": len(candidate_windows)},
+        )
 
         with connection() as conn:
             repository.update_job_progress(
@@ -367,6 +518,26 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
             )
 
         planner_messages: list[str] = []
+        if candidate_windows:
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage="planner scoring",
+                event="started",
+                message="Scoring shorts candidates with the planner model.",
+                payload={
+                    "candidate_count": len(candidate_windows),
+                    "llm_model": payload.get("llm_model", ""),
+                    "detailed_planner_logging": settings.enable_detailed_planner_logging,
+                },
+            )
+        else:
+            trace.emit(
+                stage="planner scoring",
+                event="skipped",
+                message="No candidate windows found; skipping planner scoring.",
+                severity="warning",
+            )
         scored_candidates = (
             planner.score_short_candidates(
                 settings=settings,
@@ -378,12 +549,36 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                 candidates=candidate_windows,
                 user_notes=job["user_notes"],
                 log_messages=planner_messages,
+                artifact_dir=outputs_dir if settings.enable_detailed_planner_logging else None,
             )
             if candidate_windows
             else []
         )
         for message in planner_messages:
-            _log_line(log_lines, message)
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage="planner scoring",
+                event="message",
+                message=message,
+            )
+        if candidate_windows:
+            trace.emit(
+                stage="planner scoring",
+                event="completed",
+                message=f"Planner scoring returned {len(scored_candidates)} ranked candidates.",
+                payload={
+                    "candidate_count": len(scored_candidates),
+                    "planner_prompt_artifact": "planner-prompt.txt"
+                    if settings.enable_detailed_planner_logging and (outputs_dir / "planner-prompt.txt").exists()
+                    else None,
+                    "planner_response_artifact": (
+                        "planner-response.json"
+                        if (outputs_dir / "planner-response.json").exists()
+                        else ("planner-response.txt" if (outputs_dir / "planner-response.txt").exists() else None)
+                    ),
+                },
+            )
 
         with connection() as conn:
             repository.update_job_progress(
@@ -413,9 +608,22 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
         )
         manifest_path = outputs_dir / "candidates.json"
         _write_json(manifest_path, manifest.model_dump())
-        _log_line(log_lines, "Wrote candidates.json.")
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="artifact write",
+            event="candidate_manifest_written",
+            message="Wrote candidates.json.",
+            payload={"relative_path": f"outputs/{job_id}/candidates.json"},
+        )
 
         log_path = outputs_dir / "job.log"
+        trace.emit(
+            stage="artifact write",
+            event="job_log_written",
+            message="Wrote job.log.",
+            payload={"relative_path": log_relative_path},
+        )
         log_path.write_text("\n".join(log_lines) + "\n")
 
         with connection() as conn:
@@ -433,15 +641,49 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                 relative_path=log_relative_path,
                 role="log",
             )
+            trace_file = _store_generated_file_if_exists(
+                conn,
+                settings,
+                project_id=project_id,
+                relative_path=trace_relative_path,
+                role="trace_jsonl",
+            )
+            planner_prompt_file = _store_generated_file_if_exists(
+                conn,
+                settings,
+                project_id=project_id,
+                relative_path=f"outputs/{job_id}/planner-prompt.txt",
+                role="planner_prompt",
+            )
+            planner_response_file = _store_generated_file_if_exists(
+                conn,
+                settings,
+                project_id=project_id,
+                relative_path=(
+                    f"outputs/{job_id}/planner-response.json"
+                    if (outputs_dir / "planner-response.json").exists()
+                    else f"outputs/{job_id}/planner-response.txt"
+                ),
+                role="planner_response",
+            )
             output_file_ids = [transcript_json_file["id"], candidate_manifest_file["id"]]
             if transcript_txt_file is not None:
                 output_file_ids.append(transcript_txt_file["id"])
             output_file_ids.append(log_file["id"])
+            if trace_file is not None:
+                output_file_ids.append(trace_file["id"])
+            if planner_prompt_file is not None:
+                output_file_ids.append(planner_prompt_file["id"])
+            if planner_response_file is not None:
+                output_file_ids.append(planner_response_file["id"])
             result = JobResult(
                 output_file_ids=output_file_ids,
                 transcript_file_id=transcript_txt_file["id"] if transcript_txt_file is not None else None,
                 candidate_manifest_file_id=candidate_manifest_file["id"],
                 log_file_id=log_file["id"],
+                trace_file_id=trace_file["id"] if trace_file is not None else None,
+                planner_prompt_file_id=planner_prompt_file["id"] if planner_prompt_file is not None else None,
+                planner_response_file_id=planner_response_file["id"] if planner_response_file is not None else None,
                 notes_for_user=notes_for_user,
                 transcript_preview=media.transcript_text(transcript.segments)[:1000],
                 candidates=scored_candidates,
@@ -451,12 +693,22 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
             storage.sync_project_manifest(conn, settings, project_id)
     except Exception as exc:
         message = str(exc).strip() or "Unknown failure."
+        if outputs_dir is not None:
+            trace = trace or tracing.JobTrace(outputs_dir)
+            trace.emit(
+                stage="job",
+                event="failed",
+                message=message,
+                severity="error",
+                payload={"traceback": traceback.format_exc()},
+            )
         _fail_job_with_log(
             settings=settings,
             job_id=job_id,
             project_id=project_id,
             outputs_dir=outputs_dir,
             log_relative_path=log_relative_path,
+            trace_relative_path=trace_relative_path,
             log_lines=log_lines,
             message=message,
         )
@@ -466,18 +718,29 @@ def _write_candidate_subtitles(
     *,
     candidate: CandidateClip,
     outputs_dir: Path,
+    preset: PresetConfig,
     log_lines: list[str],
-) -> tuple[Path | None, Path | None]:
+) -> tuple[Path | None, Path | None, Path | None]:
     if not candidate.subtitle_segments:
         _log_line(log_lines, "Candidate has no subtitle segments; skipping SRT/VTT generation.")
-        return None, None
+        return None, None, None
 
     srt_path = outputs_dir / "captions.srt"
     vtt_path = outputs_dir / "captions.vtt"
+    ass_path = outputs_dir / "captions.ass"
     media.write_srt(srt_path, candidate.subtitle_segments)
     media.write_vtt(vtt_path, candidate.subtitle_segments)
-    _log_line(log_lines, f"Wrote {len(candidate.subtitle_segments)} subtitle segments to SRT and VTT.")
-    return srt_path, vtt_path
+    media.write_ass_karaoke(
+        ass_path,
+        candidate.subtitle_segments,
+        base_color=preset.caption_base_color,
+        active_word_color=preset.caption_active_word_color,
+        vertical_position=preset.caption_vertical_position,
+        max_lines=preset.caption_max_lines,
+        max_words_per_line=preset.caption_max_words_per_line,
+    )
+    _log_line(log_lines, f"Wrote {len(candidate.subtitle_segments)} subtitle segments to SRT, VTT, and ASS.")
+    return srt_path, vtt_path, ass_path
 
 
 def _process_short_export_job(settings: Settings, job_id: str) -> None:
@@ -485,6 +748,8 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
     project_id = ""
     outputs_dir: Path | None = None
     log_relative_path: str | None = None
+    trace_relative_path: str | None = None
+    trace: tracing.JobTrace | None = None
 
     try:
         job, source_file, preset = _load_job_source_and_preset(settings, job_id)
@@ -497,9 +762,22 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
         outputs_dir = storage.outputs_root(settings, project_id) / job_id / candidate.id
         outputs_dir.mkdir(parents=True, exist_ok=True)
         log_relative_path = f"outputs/{job_id}/{candidate.id}/job.log"
+        trace_relative_path = f"outputs/{job_id}/{candidate.id}/trace.jsonl"
+        trace = tracing.JobTrace(outputs_dir)
         source_path = storage.resolve_project_relative_path(settings, project_id, source_file["relative_path"])
 
-        _log_line(log_lines, f"Starting short export job {job_id} for candidate {candidate.id}.")
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="job",
+            event="started",
+            message=f"Starting short export job {job_id} for candidate {candidate.id}.",
+            payload={
+                "job_id": job_id,
+                "candidate_id": candidate.id,
+                "source_candidate_job_id": source_candidate_job_id,
+            },
+        )
         with connection() as conn:
             repository.update_job_progress(
                 conn,
@@ -509,6 +787,14 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
                 progress_percent=10,
             )
 
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="probe",
+            event="started",
+            message="Inspecting source media for candidate export.",
+            payload={"source_path": source_file["relative_path"]},
+        )
         probe = media.probe_media(settings, source_path)
         duration = probe.get("duration_seconds")
         if not duration:
@@ -523,6 +809,14 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
                     "job_mode": job_mode,
                 },
             )
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="probe",
+            event="completed",
+            message=f"Source duration detected: {duration:.2f}s.",
+            payload=probe,
+        )
 
         with connection() as conn:
             repository.update_job_progress(
@@ -533,6 +827,24 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
                 progress_percent=30,
             )
 
+        export_mode = payload.get("export_mode") or preset.export_mode
+        blur_intensity = float(payload.get("blur_intensity", preset.blur_intensity))
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="export prep",
+            event="started",
+            message="Preparing candidate export artifacts.",
+            payload={
+                "candidate_id": candidate.id,
+                "start_sec": candidate.start_sec,
+                "end_sec": candidate.end_sec,
+                "caption_segment_count": len(candidate.subtitle_segments),
+                "export_mode": export_mode,
+                "blur_intensity": blur_intensity,
+            },
+        )
+
         candidate_json_path = outputs_dir / "candidate.json"
         _write_json(
             candidate_json_path,
@@ -540,13 +852,41 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
                 "candidate": candidate.model_dump(),
                 "source_candidate_job_id": source_candidate_job_id,
                 "source_file": source_file["name"],
-                "export_mode": payload.get("export_mode") or preset.export_mode,
+                "export_mode": export_mode,
+                "blur_intensity": blur_intensity,
             },
         )
-        srt_path, vtt_path = _write_candidate_subtitles(
+        trace.emit(
+            stage="artifact write",
+            event="candidate_json_written",
+            message="Wrote candidate.json.",
+            payload={"relative_path": f"outputs/{job_id}/{candidate.id}/candidate.json"},
+        )
+        srt_path, vtt_path, ass_path = _write_candidate_subtitles(
             candidate=candidate,
             outputs_dir=outputs_dir,
+            preset=preset,
             log_lines=log_lines,
+        )
+        if srt_path is not None:
+            trace.emit(
+                stage="artifact write",
+                event="captions_written",
+                message="Wrote captions.srt, captions.vtt, and captions.ass.",
+                payload={
+                    "srt": f"outputs/{job_id}/{candidate.id}/captions.srt",
+                    "vtt": f"outputs/{job_id}/{candidate.id}/captions.vtt",
+                    "ass": f"outputs/{job_id}/{candidate.id}/captions.ass",
+                    "word_count": sum(len(segment.words) for segment in candidate.subtitle_segments),
+                },
+            )
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="export prep",
+            event="completed",
+            message="Prepared candidate export artifacts.",
+            payload={"captions_ass": ass_path is not None},
         )
 
         with connection() as conn:
@@ -561,11 +901,30 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
         clip_path = outputs_dir / "clip.mp4"
         captions_path = _select_captions_path(
             captions_enabled=bool(payload.get("captions_enabled", job["captions_enabled"])),
-            subtitle_path=srt_path,
+            subtitle_path=ass_path or srt_path,
             log_lines=log_lines,
         )
         if captions_path is None:
-            _log_line(log_lines, "Rendering candidate without burned-in captions.")
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage="ffmpeg render",
+                event="captions_disabled",
+                message="Rendering candidate without burned-in captions.",
+            )
+        render_command_path = outputs_dir / "render-command.txt"
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="ffmpeg render",
+            event="started",
+            message="Rendering a vertical short with ffmpeg.",
+            payload={
+                "output_path": f"outputs/{job_id}/{candidate.id}/clip.mp4",
+                "export_mode": export_mode,
+                "captions_path": captions_path.name if captions_path else None,
+            },
+        )
         media.render_short_clip(
             settings,
             source_path=source_path,
@@ -575,19 +934,51 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
             captions_path=captions_path,
             probe=probe,
             quality_preset=payload.get("output_quality_preset", "balanced"),
-            export_mode=payload.get("export_mode") or preset.export_mode,
+            export_mode=export_mode,
+            blur_intensity=blur_intensity,
+            command_log_path=render_command_path,
         )
-        _log_line(log_lines, "Candidate render completed successfully.")
+        _log_and_trace(
+            log_lines,
+            trace,
+            stage="ffmpeg render",
+            event="completed",
+            message="Candidate render completed successfully.",
+            payload={
+                "clip_path": f"outputs/{job_id}/{candidate.id}/clip.mp4",
+                "render_command_artifact": f"outputs/{job_id}/{candidate.id}/render-command.txt",
+            },
+        )
 
         thumbnail_path = outputs_dir / "thumbnail.jpg"
         try:
             media.extract_thumbnail(settings, clip_path, thumbnail_path)
-            _log_line(log_lines, "Extracted thumbnail.jpg.")
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage="artifact write",
+                event="thumbnail_written",
+                message="Extracted thumbnail.jpg.",
+                payload={"relative_path": f"outputs/{job_id}/{candidate.id}/thumbnail.jpg"},
+            )
         except Exception as exc:
             thumbnail_path = None
-            _log_line(log_lines, f"Thumbnail extraction skipped ({exc}).")
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage="artifact write",
+                event="thumbnail_skipped",
+                message=f"Thumbnail extraction skipped ({exc}).",
+                severity="warning",
+            )
 
         log_path = outputs_dir / "job.log"
+        trace.emit(
+            stage="artifact write",
+            event="job_log_written",
+            message="Wrote job.log.",
+            payload={"relative_path": log_relative_path},
+        )
         log_path.write_text("\n".join(log_lines) + "\n")
 
         relative_prefix = f"outputs/{job_id}/{candidate.id}"
@@ -634,6 +1025,24 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
                     role="candidate_captions_vtt",
                     metadata_extra=file_metadata,
                 )
+            ass_file = None
+            if ass_path is not None:
+                ass_file = _store_generated_file(
+                    conn,
+                    settings,
+                    project_id=project_id,
+                    relative_path=f"{relative_prefix}/captions.ass",
+                    role="candidate_captions_ass",
+                    metadata_extra=file_metadata,
+                )
+            render_command_file = _store_generated_file_if_exists(
+                conn,
+                settings,
+                project_id=project_id,
+                relative_path=f"{relative_prefix}/render-command.txt",
+                role="render_command",
+                metadata_extra=file_metadata,
+            )
             thumbnail_file = None
             if thumbnail_path is not None:
                 thumbnail_file = _store_generated_file(
@@ -652,21 +1061,37 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
                 role="log",
                 metadata_extra=file_metadata,
             )
+            trace_file = _store_generated_file_if_exists(
+                conn,
+                settings,
+                project_id=project_id,
+                relative_path=trace_relative_path,
+                role="trace_jsonl",
+                metadata_extra=file_metadata,
+            )
 
             output_file_ids = [clip_file["id"], candidate_file["id"]]
             if srt_file is not None:
                 output_file_ids.append(srt_file["id"])
             if vtt_file is not None:
                 output_file_ids.append(vtt_file["id"])
+            if ass_file is not None:
+                output_file_ids.append(ass_file["id"])
+            if render_command_file is not None:
+                output_file_ids.append(render_command_file["id"])
             if thumbnail_file is not None:
                 output_file_ids.append(thumbnail_file["id"])
             output_file_ids.append(log_file["id"])
+            if trace_file is not None:
+                output_file_ids.append(trace_file["id"])
 
             result = JobResult(
                 output_file_ids=output_file_ids,
                 subtitle_file_id=srt_file["id"] if srt_file is not None else None,
                 candidate_manifest_file_id=candidate_file["id"],
                 log_file_id=log_file["id"],
+                trace_file_id=trace_file["id"] if trace_file is not None else None,
+                render_command_file_id=render_command_file["id"] if render_command_file is not None else None,
                 notes_for_user=[f"Exported {candidate.id} as a vertical short."],
                 candidates=[candidate],
                 candidate_count=1,
@@ -675,7 +1100,10 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
                     "clip_file_id": clip_file["id"],
                     "srt_file_id": srt_file["id"] if srt_file is not None else None,
                     "vtt_file_id": vtt_file["id"] if vtt_file is not None else None,
+                    "ass_file_id": ass_file["id"] if ass_file is not None else None,
                     "thumbnail_file_id": thumbnail_file["id"] if thumbnail_file is not None else None,
+                    "trace_file_id": trace_file["id"] if trace_file is not None else None,
+                    "render_command_file_id": render_command_file["id"] if render_command_file is not None else None,
                     "source_candidate_job_id": source_candidate_job_id,
                 },
             )
@@ -683,12 +1111,22 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
             storage.sync_project_manifest(conn, settings, project_id)
     except Exception as exc:
         message = str(exc).strip() or "Unknown failure."
+        if outputs_dir is not None:
+            trace = trace or tracing.JobTrace(outputs_dir)
+            trace.emit(
+                stage="job",
+                event="failed",
+                message=message,
+                severity="error",
+                payload={"traceback": traceback.format_exc()},
+            )
         _fail_job_with_log(
             settings=settings,
             job_id=job_id,
             project_id=project_id,
             outputs_dir=outputs_dir,
             log_relative_path=log_relative_path,
+            trace_relative_path=trace_relative_path,
             log_lines=log_lines,
             message=message,
         )

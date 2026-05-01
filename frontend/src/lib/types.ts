@@ -38,6 +38,10 @@ export interface JobResult {
   edit_plan_file_id: string | null;
   candidate_manifest_file_id: string | null;
   log_file_id: string | null;
+  trace_file_id: string | null;
+  planner_prompt_file_id: string | null;
+  planner_response_file_id: string | null;
+  render_command_file_id: string | null;
   notes_for_user: string[];
   transcript_preview: string | null;
   plan: Record<string, unknown> | null;
@@ -97,6 +101,7 @@ export interface SettingsResponse {
   cut_aggressiveness: Aggressiveness;
   captions_enabled: boolean;
   output_quality_preset: OutputQuality;
+  enable_detailed_planner_logging: boolean;
   project_storage_root: string;
   transcription_model: string;
 }
@@ -108,6 +113,7 @@ export interface SettingsUpdateRequest {
   cut_aggressiveness?: Aggressiveness;
   captions_enabled?: boolean;
   output_quality_preset?: OutputQuality;
+  enable_detailed_planner_logging?: boolean;
 }
 
 export interface PresetConfig {
@@ -130,7 +136,13 @@ export interface PresetConfig {
   max_candidates: number;
   scoring_weights: Record<string, number>;
   caption_behavior: string;
-  export_mode: "vertical_9_16" | "source_aspect";
+  export_mode: "center_blur_fill" | "vertical_9_16" | "source_aspect";
+  caption_base_color: string;
+  caption_active_word_color: string;
+  caption_vertical_position: "lower" | "lower_middle";
+  caption_max_lines: number;
+  caption_max_words_per_line: number;
+  blur_intensity: number;
 }
 
 export interface PresetsResponse {
@@ -150,6 +162,13 @@ export interface SubtitleSegment {
   start: number;
   end: number;
   text: string;
+  words: WordTimestamp[];
+}
+
+export interface WordTimestamp {
+  start: number;
+  end: number;
+  word: string;
 }
 
 export interface CandidateScoreBreakdown {
@@ -176,4 +195,19 @@ export interface CandidateClip {
   tags: string[];
   duplicate_group: string | null;
   subtitle_segments: SubtitleSegment[];
+}
+
+export interface TraceEvent {
+  timestamp: string;
+  stage: string;
+  event: string;
+  message: string;
+  severity: "debug" | "info" | "warning" | "error";
+  payload?: Record<string, unknown> | null;
+}
+
+export interface JobTraceResponse {
+  job_id: string;
+  events: TraceEvent[];
+  artifacts: Record<string, string>;
 }

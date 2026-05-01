@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { CandidateList } from "@/components/project/candidate-list";
+import { JobTracePanel } from "@/components/project/job-trace-panel";
 import { formatDateTime, titleizeSlug } from "@/lib/format";
 import type { CandidateClip, FileItem, JobSummary } from "@/lib/types";
 
@@ -115,6 +116,8 @@ export function JobFeed({ jobs, files, onCancel, onExportCandidate, onPreviewCan
                     onSelectFile={onSelectFile}
                   />
                 ) : null}
+
+                <JobTracePanel job={job} />
 
                 {outputFiles.length > 0 ? (
                   <div className="mt-4 flex flex-wrap gap-2">

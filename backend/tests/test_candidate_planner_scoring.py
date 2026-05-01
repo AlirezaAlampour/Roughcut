@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -114,6 +115,58 @@ class CandidatePlannerScoringTests(unittest.TestCase):
         self.assertEqual(result[0].title, "The Quantization Fix")
         self.assertEqual(result[0].score_breakdown.hook_strength, 9.0)
         self.assertEqual(result[0].tags, ["local-ai", "workflow"])
+
+    def test_score_short_candidates_persists_planner_prompt_and_response_artifacts(self) -> None:
+        planner_payload = {
+            "candidates": [
+                {
+                    "id": "clip-001",
+                    "score_total": 72,
+                    "score_breakdown": _breakdown(),
+                    "title": "Why the Local Model Failed",
+                    "hook_text": "The failure was not the model.",
+                    "rationale": "Useful setup and payoff, but a softer hook.",
+                    "tags": ["local-ai"],
+                    "duplicate_group": None,
+                },
+                {
+                    "id": "clip-002",
+                    "score_total": 91,
+                    "score_breakdown": _breakdown(hook_strength=9.0),
+                    "title": "The Quantization Fix",
+                    "hook_text": "One setting made the local workflow work.",
+                    "rationale": "Strong technical payoff.",
+                    "tags": ["workflow"],
+                    "duplicate_group": None,
+                },
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact_dir = Path(temp_dir)
+            with mock.patch(
+                "app.services.planner.llm.request_planner_completion",
+                return_value=json.dumps(planner_payload),
+            ):
+                planner.score_short_candidates(
+                    settings=self.settings,
+                    llm_base_url="http://localhost:11434/v1",
+                    llm_model="planner-model",
+                    source_filename="source.mp4",
+                    source_duration=120,
+                    preset=_preset(),
+                    candidates=self.candidates,
+                    user_notes="Favor technical payoff.",
+                    log_messages=[],
+                    artifact_dir=artifact_dir,
+                )
+
+            prompt = (artifact_dir / "planner-prompt.txt").read_text()
+            response = json.loads((artifact_dir / "planner-response.json").read_text())
+
+        self.assertIn("System prompt:", prompt)
+        self.assertIn("Score and rank pre-segmented shorts candidates", prompt)
+        self.assertEqual(response["candidates"][0]["id"], "clip-001")
 
     def test_score_short_candidates_rejects_malformed_planner_json(self) -> None:
         malformed_payload = {

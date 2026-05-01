@@ -10,7 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.schemas import EditRange, TranscriptSegment
+from app.schemas import EditRange, TranscriptSegment, WordTimestamp
 from app.services import media
 from app.services.jobs import _prepare_subtitle_file, _prepare_transcript_text_file, _select_captions_path
 
@@ -46,7 +46,17 @@ class RenderCaptionTests(unittest.TestCase):
     def test_captions_enabled_with_subtitle_segments_uses_subtitles_filter(self) -> None:
         log_lines: list[str] = []
         transcript_segments = [
-            TranscriptSegment(index=0, start=0.0, end=2.5, text="Hello from Roughcut.", words=[]),
+            TranscriptSegment(
+                index=0,
+                start=0.0,
+                end=2.5,
+                text="Hello from Roughcut.",
+                words=[
+                    WordTimestamp(start=0.1, end=0.5, word="Hello"),
+                    WordTimestamp(start=0.6, end=1.0, word="from"),
+                    WordTimestamp(start=1.1, end=1.8, word="Roughcut"),
+                ],
+            ),
         ]
 
         transcript_path = _prepare_transcript_text_file(
@@ -70,6 +80,8 @@ class RenderCaptionTests(unittest.TestCase):
         args = self._render_args(captions_path)
 
         self.assertEqual(len(subtitle_segments), 1)
+        self.assertEqual(len(subtitle_segments[0].words), 3)
+        self.assertEqual(subtitle_segments[0].words[0].word, "Hello")
         self.assertIsNotNone(transcript_path)
         self.assertTrue(media.artifact_file_has_content(transcript_path))
         self.assertIsNotNone(subtitle_path)

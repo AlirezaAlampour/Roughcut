@@ -1,6 +1,7 @@
 import type {
   JobCreateRequest,
   JobSummary,
+  JobTraceResponse,
   PresetsResponse,
   ProjectDetail,
   ProjectSummary,
@@ -134,6 +135,9 @@ export const api = {
   },
   getJob(jobId: string) {
     return request<JobSummary>(`/api/jobs/${jobId}`);
+  },
+  getJobTrace(jobId: string) {
+    return request<JobTraceResponse>(`/api/jobs/${jobId}/trace`);
   },
   cancelJob(jobId: string) {
     return request<JobSummary>(`/api/jobs/${jobId}/cancel`, {

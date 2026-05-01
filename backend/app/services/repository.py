@@ -469,6 +469,7 @@ DEFAULT_SETTINGS = (
     "cut_aggressiveness",
     "captions_enabled",
     "output_quality_preset",
+    "enable_detailed_planner_logging",
 )
 
 
@@ -480,10 +481,12 @@ def get_effective_settings(conn: sqlite3.Connection, settings: Settings) -> dict
         "cut_aggressiveness": settings.default_cut_aggressiveness,
         "captions_enabled": settings.default_captions_enabled,
         "output_quality_preset": settings.default_output_quality_preset,
+        "enable_detailed_planner_logging": settings.enable_detailed_planner_logging,
         "project_storage_root": str(settings.storage_root),
         "transcription_model": settings.whisper_model,
     }
-    rows = conn.execute("SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?)", DEFAULT_SETTINGS).fetchall()
+    placeholders = ", ".join("?" for _ in DEFAULT_SETTINGS)
+    rows = conn.execute(f"SELECT key, value FROM settings WHERE key IN ({placeholders})", DEFAULT_SETTINGS).fetchall()
     for row in rows:
         defaults[row["key"]] = _json_loads(row["value"])
     return defaults
