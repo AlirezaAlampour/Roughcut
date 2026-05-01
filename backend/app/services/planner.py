@@ -4,16 +4,43 @@ import json
 from typing import Any
 
 from app.config import Settings
-from app.schemas import EditPlan, EditRange, PresetConfig, TranscriptArtifact, TranscriptSegment
+from app.schemas import (
+    CandidateClip,
+    CandidateScoreBreakdown,
+    CandidateScoringResult,
+    EditPlan,
+    EditRange,
+    PresetConfig,
+    TranscriptArtifact,
+    TranscriptSegment,
+)
 from app.services import llm
 
-PLANNER_SYSTEM_PROMPT = """You are an expert YouTube rough-cut planner.
+PLANNER_SYSTEM_PROMPT = """You are an expert YouTube media planning model.
 
 Return exactly one JSON object that matches the provided schema.
 Do not include markdown fences, commentary, or prose before or after the JSON.
 Keep ranges must be sorted, non-overlapping, and within the source duration.
 Prefer preserving good content rather than over-cutting.
 The output will be executed by deterministic code, so the JSON must be precise."""
+
+SHORTS_SCORING_SYSTEM_PROMPT = """You are an expert shorts candidate scorer for creator, AI, and technical content.
+
+Return exactly one JSON object that matches the provided schema.
+Do not include markdown fences, commentary, or prose before or after the JSON.
+Score only the provided candidate IDs.
+The output is planner-only metadata. Deterministic code will render clips from the provided timestamps."""
+
+DEFAULT_SCORING_WEIGHTS = {
+    "hook_strength": 1.25,
+    "self_containedness": 1.1,
+    "conflict_tension": 1.0,
+    "payoff_clarity": 1.1,
+    "novelty_interestingness": 1.0,
+    "niche_relevance": 1.0,
+    "verbosity_penalty": -0.8,
+    "overlap_duplication_penalty": -0.7,
+}
 
 
 def _extract_json_blob(payload: str) -> str:
@@ -248,7 +275,7 @@ def create_edit_plan(
         )
 
     schema = json.dumps(EditPlan.model_json_schema(), indent=2)
-    prompt = f"""Create a rough-cut edit plan for one source file.
+    prompt = f"""Create a structured keep-range plan for one source file.
 
 Source file: {source_filename}
 Source duration (seconds): {source_duration}
@@ -312,14 +339,14 @@ JSON schema:
     raw_plan = EditPlan.model_validate(sanitized_payload)
     try:
         return normalize_edit_plan(
-        raw_plan=raw_plan,
-        source_file=source_filename,
-        preset=preset,
-        source_duration=source_duration,
-        source_mode=source_mode,
-        captions_enabled=captions_enabled,
-        generate_shorts=generate_shorts,
-    )
+            raw_plan=raw_plan,
+            source_file=source_filename,
+            preset=preset,
+            source_duration=source_duration,
+            source_mode=source_mode,
+            captions_enabled=captions_enabled,
+            generate_shorts=generate_shorts,
+        )
     except RuntimeError:
         _append_log(
             log_messages,
@@ -334,3 +361,151 @@ JSON schema:
             keep_reason="Planner fallback; preserved full clip",
             note_for_user="Planner output was malformed after sanitization. Generated a conservative no-cut plan.",
         )
+
+
+def _candidate_lines(candidates: list[CandidateClip]) -> str:
+    blocks = []
+    for candidate in candidates:
+        blocks.append(
+            "\n".join(
+                [
+                    f"ID: {candidate.id}",
+                    f"Time: {candidate.start_sec:0.2f}-{candidate.end_sec:0.2f}",
+                    f"Duration: {candidate.end_sec - candidate.start_sec:0.2f}s",
+                    f"Transcript excerpt: {candidate.transcript_excerpt}",
+                ]
+            )
+        )
+    return "\n\n".join(blocks)
+
+
+def _fallback_breakdown() -> CandidateScoreBreakdown:
+    return CandidateScoreBreakdown(
+        hook_strength=0,
+        self_containedness=0,
+        conflict_tension=0,
+        payoff_clarity=0,
+        novelty_interestingness=0,
+        niche_relevance=0,
+        verbosity_penalty=10,
+        overlap_duplication_penalty=0,
+    )
+
+
+def normalize_scored_candidates(
+    *,
+    candidates: list[CandidateClip],
+    scoring_result: CandidateScoringResult,
+    log_messages: list[str] | None = None,
+) -> list[CandidateClip]:
+    scores_by_id = {item.id: item for item in scoring_result.candidates}
+    normalized: list[CandidateClip] = []
+    missing_count = 0
+
+    for candidate in candidates:
+        score = scores_by_id.get(candidate.id)
+        if score is None:
+            missing_count += 1
+            normalized.append(
+                candidate.model_copy(
+                    update={
+                        "title": candidate.title or candidate.id,
+                        "rationale": "Planner did not return a score for this pre-segmented candidate.",
+                        "score_total": 0,
+                        "score_breakdown": _fallback_breakdown(),
+                    }
+                )
+            )
+            continue
+
+        normalized.append(
+            candidate.model_copy(
+                update={
+                    "title": score.title.strip(),
+                    "hook_text": score.hook_text.strip(),
+                    "rationale": score.rationale.strip(),
+                    "score_total": round(score.score_total, 2),
+                    "score_breakdown": score.score_breakdown,
+                    "tags": [tag.strip() for tag in score.tags if tag.strip()][:8],
+                    "duplicate_group": score.duplicate_group,
+                }
+            )
+        )
+
+    unknown_count = len([item for item in scoring_result.candidates if item.id not in {candidate.id for candidate in candidates}])
+    if missing_count:
+        _append_log(log_messages, f"Planner omitted {missing_count} candidate scores; kept them with score 0.")
+    if unknown_count:
+        _append_log(log_messages, f"Ignored {unknown_count} planner scores for unknown candidate IDs.")
+
+    return sorted(normalized, key=lambda item: item.score_total, reverse=True)
+
+
+def score_short_candidates(
+    *,
+    settings: Settings,
+    llm_base_url: str,
+    llm_model: str,
+    source_filename: str,
+    source_duration: float,
+    preset: PresetConfig,
+    candidates: list[CandidateClip],
+    user_notes: str | None,
+    log_messages: list[str] | None = None,
+) -> list[CandidateClip]:
+    if not candidates:
+        return []
+
+    schema = json.dumps(CandidateScoringResult.model_json_schema(), indent=2)
+    weights = {**DEFAULT_SCORING_WEIGHTS, **preset.scoring_weights}
+    prompt = f"""Score and rank pre-segmented shorts candidates for one long-form source video.
+
+Source file: {source_filename}
+Source duration (seconds): {source_duration}
+
+Preset:
+{json.dumps(preset.model_dump(), indent=2)}
+
+Scoring weights:
+{json.dumps(weights, indent=2)}
+
+User notes:
+{user_notes or "none"}
+
+Candidates:
+{_candidate_lines(candidates)}
+
+For each candidate, evaluate:
+- hook strength in the opening seconds
+- self-containedness
+- conflict/tension
+- payoff clarity
+- novelty / interestingness
+- niche relevance for creator/AI/technical content
+- verbosity penalty / rambling penalty
+- overlap / duplication penalty
+
+Return one score item for each provided candidate ID. Use score_total from 0 to 100.
+Penalty fields are 0 to 10 where higher means more penalty.
+Prefer concise, specific suggested titles and hooks that match the transcript.
+
+JSON schema:
+{schema}
+"""
+
+    response_text = llm.request_planner_completion(
+        base_url=llm_base_url,
+        model=llm_model,
+        system_prompt=SHORTS_SCORING_SYSTEM_PROMPT,
+        user_prompt=prompt,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
+    raw_payload = json.loads(_extract_json_blob(response_text))
+    scoring_result = CandidateScoringResult.model_validate(raw_payload)
+    scored_candidates = normalize_scored_candidates(
+        candidates=candidates,
+        scoring_result=scoring_result,
+        log_messages=log_messages,
+    )
+    _append_log(log_messages, f"Planner scored {len(scored_candidates)} shorts candidates.")
+    return scored_candidates

@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useRef } from "react";
 import { FileText, Film, Music4 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -5,7 +8,22 @@ import { Badge } from "@/components/ui/badge";
 import { formatBytes, formatDuration } from "@/lib/format";
 import type { FileItem } from "@/lib/types";
 
-export function MediaPreview({ file }: { file?: FileItem | null }) {
+export function MediaPreview({ file, previewStartSec }: { file?: FileItem | null; previewStartSec?: number | null }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const isVideo = file?.mime_type?.startsWith("video/");
+  const isAudio = file?.mime_type?.startsWith("audio/");
+
+  useEffect(() => {
+    if (!videoRef.current || !isVideo || previewStartSec === null || previewStartSec === undefined) {
+      return;
+    }
+    try {
+      videoRef.current.currentTime = Math.max(0, previewStartSec);
+    } catch {
+      // Some browsers reject seeking before metadata is loaded; onLoadedMetadata handles that path.
+    }
+  }, [file?.id, isVideo, previewStartSec]);
+
   if (!file) {
     return (
       <Card className="h-full">
@@ -16,16 +34,13 @@ export function MediaPreview({ file }: { file?: FileItem | null }) {
           <div>
             <h3 className="text-lg font-medium">Nothing selected</h3>
             <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-              Choose an uploaded source or generated output to preview it here.
+              Choose a source, candidate manifest, or exported short to inspect it here.
             </p>
           </div>
         </CardContent>
       </Card>
     );
   }
-
-  const isVideo = file.mime_type?.startsWith("video/");
-  const isAudio = file.mime_type?.startsWith("audio/");
 
   return (
     <Card className="h-full">
@@ -41,7 +56,18 @@ export function MediaPreview({ file }: { file?: FileItem | null }) {
       <CardContent className="space-y-6">
         <div className="overflow-hidden rounded-[28px] border border-border/70 bg-[#f5f1ea]">
           {isVideo ? (
-            <video key={file.id} controls className="aspect-video w-full bg-black" src={file.preview_url || file.download_url} />
+            <video
+              ref={videoRef}
+              key={file.id}
+              controls
+              className="max-h-[720px] w-full bg-black object-contain"
+              src={file.preview_url || file.download_url}
+              onLoadedMetadata={(event) => {
+                if (previewStartSec !== null && previewStartSec !== undefined) {
+                  event.currentTarget.currentTime = Math.max(0, previewStartSec);
+                }
+              }}
+            />
           ) : isAudio ? (
             <div className="flex min-h-[260px] flex-col items-center justify-center gap-5 px-8 py-10">
               <div className="flex size-16 items-center justify-center rounded-3xl bg-primary/10 text-primary">
@@ -57,7 +83,7 @@ export function MediaPreview({ file }: { file?: FileItem | null }) {
               <div>
                 <h3 className="text-lg font-medium text-foreground">Preview not available</h3>
                 <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                  This artifact is stored and downloadable, but this surface only previews playable media in v1.
+                  This artifact is stored and downloadable. Playable source and exported short videos preview here.
                 </p>
               </div>
             </div>
@@ -88,4 +114,3 @@ export function MediaPreview({ file }: { file?: FileItem | null }) {
     </Card>
   );
 }
-

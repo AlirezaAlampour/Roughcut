@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     default_llm_base_url: str = ""
     default_llm_model: str = ""
-    default_preset: str = "talking_head_clean"
+    default_preset: str = "tacdel_builder_story"
     default_cut_aggressiveness: str = "balanced"
     default_captions_enabled: bool = True
     default_output_quality_preset: str = "balanced"
@@ -66,4 +66,3 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.ensure_directories()
     return settings
-

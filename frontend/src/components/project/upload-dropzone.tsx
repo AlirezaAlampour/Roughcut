@@ -22,7 +22,7 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
     if (uploadProgress !== null) {
       return `Uploading ${uploadProgress}%`;
     }
-    return "Drop raw video or audio here, or choose files from your computer.";
+    return "Drop one long-form video or audio source here, or choose a file from your computer.";
   }, [uploadProgress]);
 
   function emitFiles(fileList: FileList | null) {
@@ -55,7 +55,7 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
           <CloudUpload className="size-6" />
         </div>
         <div className="space-y-2">
-          <h3 className="text-lg font-medium tracking-tight text-foreground">Upload source media</h3>
+          <h3 className="text-lg font-medium tracking-tight text-foreground">Upload long-form source</h3>
           <p className="max-w-md text-sm leading-6 text-muted-foreground">{helperText}</p>
         </div>
         {uploadProgress !== null ? <Progress value={uploadProgress} className="max-w-sm" /> : null}
@@ -75,4 +75,3 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
     </Card>
   );
 }
-

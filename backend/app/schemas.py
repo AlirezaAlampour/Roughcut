@@ -51,10 +51,15 @@ class JobResult(BaseModel):
     transcript_file_id: str | None = None
     subtitle_file_id: str | None = None
     edit_plan_file_id: str | None = None
+    candidate_manifest_file_id: str | None = None
     log_file_id: str | None = None
     notes_for_user: list[str] = Field(default_factory=list)
     transcript_preview: str | None = None
     plan: dict[str, Any] | None = None
+    candidates: list["CandidateClip"] = Field(default_factory=list)
+    candidate_count: int = 0
+    exported_candidate_id: str | None = None
+    export: dict[str, Any] | None = None
 
 
 class JobSummary(BaseModel):
@@ -168,6 +173,14 @@ class PresetConfig(BaseModel):
     shorts_behavior: str
     cta_preservation: str
     planner_hint: str
+    target_clip_min_sec: float = 20.0
+    target_clip_max_sec: float = 90.0
+    target_clip_ideal_sec: float = 45.0
+    candidate_overlap_sec: float = 8.0
+    max_candidates: int = 12
+    scoring_weights: dict[str, float] = Field(default_factory=dict)
+    caption_behavior: str = "burned_in_default"
+    export_mode: Literal["vertical_9_16", "source_aspect"] = "vertical_9_16"
 
 
 class PresetsResponse(BaseModel):
@@ -181,7 +194,7 @@ class JobCreateRequest(BaseModel):
     preset_id: str
     aggressiveness: Literal["conservative", "balanced", "aggressive"] = "balanced"
     captions_enabled: bool = True
-    generate_shorts: bool = False
+    generate_shorts: bool = True
     user_notes: str | None = Field(default=None, max_length=600)
 
 
@@ -220,6 +233,81 @@ class SubtitleSegment(BaseModel):
     start: float
     end: float
     text: str
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "SubtitleSegment":
+        if self.end <= self.start:
+            raise ValueError("Subtitle segments must have end > start.")
+        return self
+
+
+class CandidateScoreBreakdown(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hook_strength: float = Field(ge=0, le=10)
+    self_containedness: float = Field(ge=0, le=10)
+    conflict_tension: float = Field(ge=0, le=10)
+    payoff_clarity: float = Field(ge=0, le=10)
+    novelty_interestingness: float = Field(ge=0, le=10)
+    niche_relevance: float = Field(ge=0, le=10)
+    verbosity_penalty: float = Field(ge=0, le=10)
+    overlap_duplication_penalty: float = Field(ge=0, le=10)
+
+
+class CandidateClip(BaseModel):
+    id: str
+    start_sec: float
+    end_sec: float
+    transcript_excerpt: str
+    title: str = ""
+    hook_text: str = ""
+    rationale: str = ""
+    score_total: float = Field(default=0, ge=0, le=100)
+    score_breakdown: CandidateScoreBreakdown | None = None
+    tags: list[str] = Field(default_factory=list)
+    duplicate_group: str | None = None
+    subtitle_segments: list[SubtitleSegment] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "CandidateClip":
+        if self.end_sec <= self.start_sec:
+            raise ValueError("Candidate clips must have end_sec > start_sec.")
+        return self
+
+
+class CandidateScoreItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    score_total: float = Field(ge=0, le=100)
+    score_breakdown: CandidateScoreBreakdown
+    title: str = Field(min_length=1, max_length=120)
+    hook_text: str = Field(min_length=1, max_length=240)
+    rationale: str = Field(min_length=1, max_length=600)
+    tags: list[str] = Field(default_factory=list, max_length=8)
+    duplicate_group: str | None = Field(default=None, max_length=80)
+
+
+class CandidateScoringResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[CandidateScoreItem]
+
+
+class CandidateManifest(BaseModel):
+    source_file: str
+    preset: str
+    source_duration: float
+    target_clip_min_sec: float
+    target_clip_max_sec: float
+    candidates: list[CandidateClip] = Field(default_factory=list)
+    notes_for_user: list[str] = Field(default_factory=list)
+
+
+class CandidateExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    captions_enabled: bool | None = None
 
 
 class ZoomEvent(BaseModel):

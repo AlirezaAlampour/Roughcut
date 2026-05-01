@@ -36,7 +36,7 @@ export default function SettingsPage() {
       <PageHeader
         eyebrow="Configuration"
         title="Keep the setup small."
-        description="Point the backend at your local planner, pick steady defaults, and leave the rest alone until you actually need more control."
+        description="Point the backend at your local planner, pick shorts-oriented defaults, and leave the rest alone until you actually need more control."
       />
 
       {loading ? (

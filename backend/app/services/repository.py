@@ -294,6 +294,7 @@ def create_job(
     generate_shorts: bool,
     user_notes: str | None,
     payload: dict[str, Any],
+    kind: str = "shorts_candidate_generation",
 ) -> dict[str, Any]:
     now = utc_now()
     job_id = uuid.uuid4().hex
@@ -304,12 +305,13 @@ def create_job(
             captions_enabled, generate_shorts, user_notes, current_step, progress_message,
             progress_percent, payload_json, created_at, updated_at
         )
-        VALUES (?, ?, ?, 'rough_cut', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             job_id,
             project_id,
             source_file_id,
+            kind,
             preset_id,
             aggressiveness,
             int(captions_enabled),
@@ -396,7 +398,7 @@ def complete_job(conn: sqlite3.Connection, job_id: str, result: dict[str, Any]) 
         UPDATE jobs
         SET status = 'completed',
             current_step = 'completed',
-            progress_message = 'Rough cut complete.',
+            progress_message = 'Job complete.',
             progress_percent = 100,
             result_json = ?,
             finished_at = ?,
@@ -418,7 +420,7 @@ def fail_job(conn: sqlite3.Connection, job_id: str, error_message: str) -> dict[
         UPDATE jobs
         SET status = 'failed',
             current_step = 'failed',
-            progress_message = 'Rough cut failed.',
+            progress_message = 'Job failed.',
             error_message = ?,
             finished_at = ?,
             updated_at = ?

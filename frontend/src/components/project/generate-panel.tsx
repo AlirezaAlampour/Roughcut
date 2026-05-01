@@ -5,7 +5,6 @@ import { WandSparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -35,7 +34,6 @@ export function GeneratePanel({
   const [presetId, setPresetId] = useState(defaultPreset || "");
   const [aggressiveness, setAggressiveness] = useState<Aggressiveness>(defaultAggressiveness);
   const [captionsEnabled, setCaptionsEnabled] = useState(defaultCaptions);
-  const [generateShorts, setGenerateShorts] = useState(false);
   const [userNotes, setUserNotes] = useState("");
 
   useEffect(() => {
@@ -55,9 +53,9 @@ export function GeneratePanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-xl">Generate rough cut</CardTitle>
+        <CardTitle className="text-xl">Generate shorts candidates</CardTitle>
         <CardDescription>
-          Keep the planning surface tight. Pick a source, choose a preset, add optional nuance, then run.
+          Pick one long source, choose a shorts preset, and let the local planner rank candidate clips.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -92,20 +90,22 @@ export function GeneratePanel({
             </SelectContent>
           </Select>
           {activePreset ? (
-            <p className="text-sm leading-6 text-muted-foreground">{activePreset.description}</p>
+            <p className="text-sm leading-6 text-muted-foreground">
+              {activePreset.description} Targets {activePreset.target_clip_min_sec}-{activePreset.target_clip_max_sec}s.
+            </p>
           ) : null}
         </div>
 
         <div className="space-y-2">
-          <Label>Aggressiveness</Label>
+          <Label>Candidate density</Label>
           <Select value={aggressiveness} onValueChange={(value) => setAggressiveness(value as Aggressiveness)}>
             <SelectTrigger>
-              <SelectValue placeholder="Select pacing" />
+              <SelectValue placeholder="Select density" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="conservative">Conservative</SelectItem>
+              <SelectItem value="conservative">Fewer, longer</SelectItem>
               <SelectItem value="balanced">Balanced</SelectItem>
-              <SelectItem value="aggressive">Aggressive</SelectItem>
+              <SelectItem value="aggressive">More, tighter</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -114,23 +114,16 @@ export function GeneratePanel({
           <div className="flex items-center justify-between gap-4">
             <div>
               <Label>Burn captions into output</Label>
-              <p className="mt-1 text-sm text-muted-foreground">Transcript and SRT are still exported either way.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Candidate exports still include SRT and VTT when available.</p>
             </div>
             <Switch checked={captionsEnabled} onCheckedChange={setCaptionsEnabled} />
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Label>Suggest shorts candidates</Label>
-              <p className="mt-1 text-sm text-muted-foreground">Ask the planner to mark strong clip ideas in the plan.</p>
-            </div>
-            <Switch checked={generateShorts} onCheckedChange={setGenerateShorts} />
           </div>
         </div>
 
         <div className="space-y-2">
           <Label>Notes for the planner</Label>
           <Textarea
-            placeholder="Examples: keep pauses natural, preserve humor, tighter pacing, protect the CTA."
+            placeholder="Examples: favor local AI lessons, avoid salesy CTAs, prefer blunt technical takes."
             value={userNotes}
             onChange={(event) => setUserNotes(event.target.value)}
           />
@@ -146,16 +139,15 @@ export function GeneratePanel({
               preset_id: presetId,
               aggressiveness,
               captions_enabled: captionsEnabled,
-              generate_shorts: generateShorts,
+              generate_shorts: true,
               user_notes: userNotes.trim() || undefined
             })
           }
         >
           <WandSparkles className="mr-2 size-4" />
-          {busy ? "Generating..." : "Generate rough cut"}
+          {busy ? "Generating..." : "Generate Shorts Candidates"}
         </Button>
       </CardContent>
     </Card>
   );
 }
-

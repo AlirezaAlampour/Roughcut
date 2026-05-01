@@ -6,16 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { CandidateList } from "@/components/project/candidate-list";
 import { formatDateTime, titleizeSlug } from "@/lib/format";
-import type { FileItem, JobSummary } from "@/lib/types";
+import type { CandidateClip, FileItem, JobSummary } from "@/lib/types";
 
 interface JobFeedProps {
   jobs: JobSummary[];
   files: FileItem[];
   onCancel: (job: JobSummary) => Promise<void> | void;
+  onExportCandidate: (job: JobSummary, candidate: CandidateClip) => Promise<void> | void;
+  onPreviewCandidate: (job: JobSummary, candidate: CandidateClip) => void;
+  onSelectFile: (file: FileItem) => void;
 }
 
-export function JobFeed({ jobs, files, onCancel }: JobFeedProps) {
+export function JobFeed({ jobs, files, onCancel, onExportCandidate, onPreviewCandidate, onSelectFile }: JobFeedProps) {
   const fileMap = new Map(files.map((file) => [file.id, file]));
 
   return (
@@ -26,7 +30,7 @@ export function JobFeed({ jobs, files, onCancel }: JobFeedProps) {
       <CardContent className="space-y-4">
         {jobs.length === 0 ? (
           <div className="rounded-[24px] bg-muted/75 p-5 text-sm leading-6 text-muted-foreground">
-            No runs yet. Generate a rough cut to see job progress, notes, transcript preview, and downloadable outputs here.
+            No runs yet. Generate shorts candidates to see ranked clips, export progress, and downloadable artifacts here.
           </div>
         ) : (
           jobs.map((job) => {
@@ -40,7 +44,10 @@ export function JobFeed({ jobs, files, onCancel }: JobFeedProps) {
                   <div>
                     <div className="flex items-center gap-3">
                       <StatusBadge status={job.status} />
-                      <p className="text-sm font-medium text-foreground">{titleizeSlug(job.preset_id)}</p>
+                      <p className="text-sm font-medium text-foreground">
+                        {job.kind === "short_export" ? "Short export" : "Shorts candidate generation"} ·{" "}
+                        {titleizeSlug(job.preset_id)}
+                      </p>
                     </div>
                     {job.input_type || job.job_mode ? (
                       <div className="mt-2 flex flex-wrap gap-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">
@@ -82,7 +89,7 @@ export function JobFeed({ jobs, files, onCancel }: JobFeedProps) {
 
                 {job.result?.notes_for_user?.length ? (
                   <div className="mt-4 rounded-[22px] bg-muted/75 p-4">
-                    <p className="panel-label">Edit notes</p>
+                    <p className="panel-label">Run notes</p>
                     <ul className="mt-3 space-y-2 text-sm leading-6 text-foreground">
                       {job.result.notes_for_user.map((note) => (
                         <li key={note}>{note}</li>
@@ -98,13 +105,24 @@ export function JobFeed({ jobs, files, onCancel }: JobFeedProps) {
                   </div>
                 ) : null}
 
+                {job.kind === "shorts_candidate_generation" && job.status === "completed" ? (
+                  <CandidateList
+                    sourceJob={job}
+                    jobs={jobs}
+                    files={files}
+                    onExport={onExportCandidate}
+                    onPreviewSource={onPreviewCandidate}
+                    onSelectFile={onSelectFile}
+                  />
+                ) : null}
+
                 {outputFiles.length > 0 ? (
                   <div className="mt-4 flex flex-wrap gap-2">
                     {outputFiles.map((file) => (
                       <Button key={file.id} variant="secondary" size="sm" asChild>
                         <a href={file.download_url} download>
                           <Download className="mr-2 size-4" />
-                          {file.role === "render" ? "Rough cut" : file.name}
+                          {file.role === "candidate_clip" ? "Short MP4" : file.name}
                         </a>
                       </Button>
                     ))}

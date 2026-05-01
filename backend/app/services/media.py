@@ -94,6 +94,10 @@ def _format_srt_timestamp(value: float) -> str:
     return f"{hours:02}:{minutes:02}:{seconds:02},{milliseconds:03}"
 
 
+def _format_vtt_timestamp(value: float) -> str:
+    return _format_srt_timestamp(value).replace(",", ".")
+
+
 def remap_segments_to_keep_ranges(
     segments: list[TranscriptSegment], keep_ranges: list[EditRange]
 ) -> list[SubtitleSegment]:
@@ -122,6 +126,30 @@ def remap_segments_to_keep_ranges(
     return remapped
 
 
+def remap_segments_to_time_range(
+    segments: list[TranscriptSegment],
+    start_sec: float,
+    end_sec: float,
+) -> list[SubtitleSegment]:
+    remapped: list[SubtitleSegment] = []
+    for segment in segments:
+        text = segment.text.strip()
+        if not text:
+            continue
+        overlap_start = max(segment.start, start_sec)
+        overlap_end = min(segment.end, end_sec)
+        if overlap_end <= overlap_start:
+            continue
+        remapped.append(
+            SubtitleSegment(
+                start=round(overlap_start - start_sec, 3),
+                end=round(overlap_end - start_sec, 3),
+                text=text,
+            )
+        )
+    return remapped
+
+
 def write_srt(path: Path, segments: list[SubtitleSegment]) -> None:
     blocks = []
     for index, segment in enumerate(segments, start=1):
@@ -135,6 +163,21 @@ def write_srt(path: Path, segments: list[SubtitleSegment]) -> None:
             )
         )
     path.write_text("\n\n".join(blocks))
+
+
+def write_vtt(path: Path, segments: list[SubtitleSegment]) -> None:
+    blocks = ["WEBVTT"]
+    for index, segment in enumerate(segments, start=1):
+        blocks.append(
+            "\n".join(
+                [
+                    str(index),
+                    f"{_format_vtt_timestamp(segment.start)} --> {_format_vtt_timestamp(segment.end)}",
+                    segment.text.strip(),
+                ]
+            )
+        )
+    path.write_text("\n\n".join(blocks) + "\n")
 
 
 def artifact_file_has_content(path: Path | None) -> bool:
@@ -157,6 +200,136 @@ def _quality_args(quality_preset: str) -> tuple[str, str]:
         "quality": ("slow", "20"),
     }
     return mapping.get(quality_preset, mapping["balanced"])
+
+
+def _subtitle_filter(captions_path: Path) -> str:
+    return (
+        f"subtitles={captions_path.as_posix()}:"
+        "force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF&,"
+        "OutlineColour=&H00151515&,BorderStyle=1,Outline=3,Shadow=1,"
+        "Alignment=2,MarginV=220'"
+    )
+
+
+def _vertical_filter_chain(video_input: str, probe: dict[str, Any]) -> tuple[list[str], str]:
+    width = float(probe.get("width") or 0)
+    height = float(probe.get("height") or 0)
+    aspect_ratio = width / height if width > 0 and height > 0 else 16 / 9
+
+    if aspect_ratio >= 0.75:
+        return (
+            [
+                f"{video_input}scale=1080:1920:force_original_aspect_ratio=increase,"
+                "crop=1080:1920,setsar=1[basev]"
+            ],
+            "[basev]",
+        )
+
+    return (
+        [
+            f"{video_input}split=2[fgsrc][bgsrc]",
+            "[bgsrc]scale=1080:1920:force_original_aspect_ratio=increase,"
+            "crop=1080:1920,gblur=sigma=28,eq=brightness=-0.08[bgv]",
+            "[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease,setsar=1[fgv]",
+            "[bgv][fgv]overlay=(W-w)/2:(H-h)/2[basev]",
+        ],
+        "[basev]",
+    )
+
+
+def render_short_clip(
+    settings: Settings,
+    source_path: Path,
+    output_path: Path,
+    *,
+    start_sec: float,
+    end_sec: float,
+    captions_path: Path | None,
+    probe: dict[str, Any],
+    quality_preset: str,
+    export_mode: str,
+) -> None:
+    if end_sec <= start_sec:
+        raise RuntimeError("Candidate export requires end_sec > start_sec.")
+
+    has_video = bool(probe.get("has_video"))
+    has_audio = bool(probe.get("has_audio"))
+    if not has_video and not has_audio:
+        raise RuntimeError("Source file has no renderable audio or video streams.")
+
+    duration = end_sec - start_sec
+    filter_parts: list[str] = []
+    audio_label = None
+
+    if has_video:
+        trimmed_video = f"[0:v]trim=start={start_sec}:end={end_sec},setpts=PTS-STARTPTS,"
+        if export_mode == "vertical_9_16":
+            chains, video_label = _vertical_filter_chain(trimmed_video, probe)
+            filter_parts.extend(chains)
+        else:
+            filter_parts.append(f"{trimmed_video}setsar=1[basev]")
+            video_label = "[basev]"
+    else:
+        filter_parts.append(f"color=c=#161616:s=1080x1920:d={duration},format=yuv420p[basev]")
+        video_label = "[basev]"
+
+    if has_audio:
+        filter_parts.append(f"[0:a]atrim=start={start_sec}:end={end_sec},asetpts=PTS-STARTPTS[basea]")
+        audio_label = "[basea]"
+
+    final_video_label = video_label
+    if subtitle_file_is_usable(captions_path):
+        filter_parts.append(f"{video_label}{_subtitle_filter(captions_path)}[vout]")
+        final_video_label = "[vout]"
+
+    preset, crf = _quality_args(quality_preset)
+    args = [
+        settings.ffmpeg_binary,
+        "-y",
+        "-i",
+        str(source_path),
+        "-filter_complex",
+        ";".join(filter_parts),
+        "-map",
+        final_video_label,
+    ]
+    if audio_label is not None:
+        args.extend(["-map", audio_label, "-c:a", "aac", "-b:a", "192k"])
+
+    args.extend(
+        [
+            "-c:v",
+            "libx264",
+            "-preset",
+            preset,
+            "-crf",
+            crf,
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+    )
+    _run(args)
+
+
+def extract_thumbnail(settings: Settings, video_path: Path, output_path: Path, *, offset_seconds: float = 1.0) -> None:
+    _run(
+        [
+            settings.ffmpeg_binary,
+            "-y",
+            "-ss",
+            str(max(0.0, offset_seconds)),
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "2",
+            str(output_path),
+        ]
+    )
 
 
 def render_rough_cut(

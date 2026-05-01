@@ -12,7 +12,7 @@ Future coding agents should preserve these project constraints:
 - keep the LLM planner-only
 - keep media execution deterministic in Python + ffmpeg
 - prefer explicit code over abstraction layers
-- preserve the simple workflow: upload -> transcribe -> plan -> render -> preview/download
+- preserve the simple workflow: upload -> transcribe -> generate candidates -> score/rank -> export selected shorts
 
 Avoid:
 - timeline editing features

@@ -126,6 +126,12 @@ export const api = {
       body: JSON.stringify(payload)
     });
   },
+  exportCandidate(projectId: string, jobId: string, candidateId: string, captionsEnabled?: boolean) {
+    return request<JobSummary>(`/api/projects/${projectId}/jobs/${jobId}/candidates/${candidateId}/export`, {
+      method: "POST",
+      body: JSON.stringify({ captions_enabled: captionsEnabled })
+    });
+  },
   getJob(jobId: string) {
     return request<JobSummary>(`/api/jobs/${jobId}`);
   },
@@ -136,4 +142,3 @@ export const api = {
     });
   }
 };
-

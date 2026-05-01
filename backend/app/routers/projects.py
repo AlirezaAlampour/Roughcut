@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from app.config import get_settings
 from app.db import get_db
 from app.schemas import (
+    CandidateExportRequest,
     FileItem,
     FileRenameRequest,
     JobCreateRequest,
@@ -227,7 +228,7 @@ def create_job(
     if source_file is None:
         raise HTTPException(status_code=404, detail="Source file not found.")
     if source_file["kind"] != "upload":
-        raise HTTPException(status_code=400, detail="Only uploaded source media can be used for rough-cut jobs.")
+        raise HTTPException(status_code=400, detail="Only uploaded source media can be used for shorts candidate jobs.")
 
     config = get_settings()
     preset = presets.get_preset(config, payload.preset_id)
@@ -248,7 +249,7 @@ def create_job(
         preset_id=payload.preset_id,
         aggressiveness=payload.aggressiveness,
         captions_enabled=payload.captions_enabled,
-        generate_shorts=payload.generate_shorts,
+        generate_shorts=True,
         user_notes=payload.user_notes,
         payload={
             "llm_base_url": effective_settings["llm_base_url"],
@@ -256,6 +257,65 @@ def create_job(
             "output_quality_preset": effective_settings["output_quality_preset"],
             "preset": preset.model_dump(),
         },
+        kind="shorts_candidate_generation",
     )
     storage.sync_project_manifest(conn, config, project_id)
     return JobSummary.model_validate(job)
+
+
+@router.post("/{project_id}/jobs/{job_id}/candidates/{candidate_id}/export", response_model=JobSummary)
+def export_candidate(
+    project_id: str,
+    job_id: str,
+    candidate_id: str,
+    payload: CandidateExportRequest,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> JobSummary:
+    project = repository.get_project(conn, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    candidate_job = repository.get_job(conn, job_id)
+    if candidate_job is None or candidate_job["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Candidate generation job not found.")
+    if candidate_job["status"] != "completed" or candidate_job["result"] is None:
+        raise HTTPException(status_code=409, detail="Candidates are not ready to export yet.")
+
+    result = candidate_job["result"]
+    candidate = next((item for item in result.candidates if item.id == candidate_id), None)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Candidate not found.")
+
+    source_file = repository.get_file(conn, project_id, candidate_job["source_file_id"])
+    if source_file is None:
+        raise HTTPException(status_code=404, detail="Source file not found.")
+
+    config = get_settings()
+    preset = presets.get_preset(config, candidate_job["preset_id"])
+    if preset is None:
+        raise HTTPException(status_code=400, detail="Unknown preset.")
+    effective_settings = repository.get_effective_settings(conn, config)
+    captions_enabled = candidate_job["captions_enabled"] if payload.captions_enabled is None else payload.captions_enabled
+
+    export_job = repository.create_job(
+        conn,
+        project_id=project_id,
+        source_file_id=source_file["id"],
+        preset_id=candidate_job["preset_id"],
+        aggressiveness=candidate_job["aggressiveness"],
+        captions_enabled=bool(captions_enabled),
+        generate_shorts=False,
+        user_notes=None,
+        payload={
+            "source_candidate_job_id": job_id,
+            "candidate_id": candidate.id,
+            "candidate": candidate.model_dump(),
+            "captions_enabled": bool(captions_enabled),
+            "output_quality_preset": effective_settings["output_quality_preset"],
+            "export_mode": preset.export_mode,
+            "preset": preset.model_dump(),
+        },
+        kind="short_export",
+    )
+    storage.sync_project_manifest(conn, config, project_id)
+    return JobSummary.model_validate(export_job)

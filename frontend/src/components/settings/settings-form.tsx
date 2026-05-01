@@ -60,7 +60,7 @@ export function SettingsForm({
       <CardHeader>
         <CardTitle className="text-2xl">Settings</CardTitle>
         <CardDescription>
-          Keep this short. The only things that really matter in v1 are where the planner lives and how aggressively the pipeline should cut.
+          Keep this short. The v1 controls are the planner endpoint, shorts preset, candidate density, caption default, and render quality.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -99,7 +99,7 @@ export function SettingsForm({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Default cut aggressiveness</Label>
+            <Label>Default candidate density</Label>
             <Select
               value={values.cut_aggressiveness}
               onValueChange={(value) => update("cut_aggressiveness", value as SettingsResponse["cut_aggressiveness"])}
@@ -108,9 +108,9 @@ export function SettingsForm({
                 <SelectValue placeholder="Choose pacing" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="conservative">Conservative</SelectItem>
+                <SelectItem value="conservative">Fewer, longer</SelectItem>
                 <SelectItem value="balanced">Balanced</SelectItem>
-                <SelectItem value="aggressive">Aggressive</SelectItem>
+                <SelectItem value="aggressive">More, tighter</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -135,7 +135,7 @@ export function SettingsForm({
               <div>
                 <Label>Captions on by default</Label>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  This toggles burned-in captions for new jobs. Transcript and SRT exports remain available.
+                  This toggles burned-in captions for candidate exports. SRT and VTT files remain available.
                 </p>
               </div>
               <Switch checked={values.captions_enabled} onCheckedChange={(checked) => update("captions_enabled", checked)} />

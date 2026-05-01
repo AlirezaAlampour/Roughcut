@@ -25,7 +25,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             <div>
               <p className="font-serif text-2xl tracking-tight">Roughcut</p>
-              <p className="text-sm text-muted-foreground">Local-first editing appliance</p>
+              <p className="text-sm text-muted-foreground">Local-first shorts factory</p>
             </div>
           </div>
 
@@ -54,7 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="mt-8 rounded-[24px] border border-border/70 bg-[linear-gradient(180deg,rgba(245,241,234,0.92),rgba(255,255,255,0.98))] p-4">
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">Local Run</p>
             <p className="mt-2 text-sm leading-6 text-foreground">
-              Upload from your main PC, process on the DGX Spark, and keep the whole pipeline on your own network.
+              Upload long-form media, generate ranked shorts candidates, and keep the whole pipeline on your own network.
             </p>
           </div>
         </aside>
@@ -64,4 +64,3 @@ export function AppShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
-

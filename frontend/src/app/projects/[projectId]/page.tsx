@@ -27,7 +27,15 @@ import { NameDialog } from "@/components/ui/name-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import type { FileItem, JobCreateRequest, PresetConfig, ProjectDetail, SettingsResponse } from "@/lib/types";
+import type {
+  CandidateClip,
+  FileItem,
+  JobCreateRequest,
+  JobSummary,
+  PresetConfig,
+  ProjectDetail,
+  SettingsResponse
+} from "@/lib/types";
 
 export default function ProjectDetailPage() {
   const params = useParams<{ projectId: string }>();
@@ -39,6 +47,7 @@ export default function ProjectDetailPage() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [jobBusy, setJobBusy] = useState(false);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [previewStartSec, setPreviewStartSec] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<FileItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
 
@@ -92,6 +101,7 @@ export default function ProjectDetailPage() {
       const response = await api.uploadFiles(projectId, files, ({ percent }) => setUploadProgress(percent));
       await loadProject();
       setSelectedFileId(response.files[0]?.id || null);
+      setPreviewStartSec(null);
       if (response.errors.length > 0) {
         toast.warning(response.errors.join(" "));
       } else {
@@ -126,6 +136,7 @@ export default function ProjectDetailPage() {
       await api.deleteFile(projectId, deleteTarget.id);
       if (selectedFileId === deleteTarget.id) {
         setSelectedFileId(null);
+        setPreviewStartSec(null);
       }
       await loadProject();
       toast.success("File deleted.");
@@ -140,7 +151,7 @@ export default function ProjectDetailPage() {
       setJobBusy(true);
       await api.createJob(projectId, payload);
       await loadProject();
-      toast.success("Rough-cut job queued.");
+      toast.success("Shorts candidate job queued.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create job.");
     } finally {
@@ -156,6 +167,26 @@ export default function ProjectDetailPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not cancel job.");
     }
+  }
+
+  async function handleExportCandidate(job: JobSummary, candidate: CandidateClip) {
+    try {
+      await api.exportCandidate(projectId, job.id, candidate.id, job.captions_enabled);
+      await loadProject();
+      toast.success("Short export queued.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not export candidate.");
+    }
+  }
+
+  function handlePreviewCandidate(job: JobSummary, candidate: CandidateClip) {
+    setSelectedFileId(job.source_file_id);
+    setPreviewStartSec(candidate.start_sec);
+  }
+
+  function handleSelectFile(file: FileItem) {
+    setSelectedFileId(file.id);
+    setPreviewStartSec(null);
   }
 
   if (loading) {
@@ -186,7 +217,7 @@ export default function ProjectDetailPage() {
       <PageHeader
         eyebrow="Project Workspace"
         title={project.name}
-        description={`Created ${formatDateTime(project.created_at)}. Upload source media on the left, preview selections in the center, and run one calm rough-cut flow from the right panel.`}
+        description={`Created ${formatDateTime(project.created_at)}. Upload one long source, generate ranked shorts candidates, then export the clips worth testing.`}
         actions={
           selectedFile ? (
             <Button variant="secondary" asChild>
@@ -204,27 +235,27 @@ export default function ProjectDetailPage() {
           <UploadDropzone uploadProgress={uploadProgress} onFilesSelected={handleUpload} disabled={jobBusy} />
           <FileList
             title="Uploads"
-            description="Raw source files from the browser."
+            description="Long-form source media from the browser."
             files={uploads}
             selectedFileId={selectedFileId}
             emptyMessage="Drag raw media into the upload area to get started."
-            onSelect={(file) => setSelectedFileId(file.id)}
+            onSelect={handleSelectFile}
             onRename={setRenameTarget}
             onDelete={setDeleteTarget}
           />
           <FileList
             title="Outputs"
-            description="Rendered rough cuts, transcripts, subtitles, plans, and logs."
+            description="Candidate manifests, exported shorts, captions, thumbnails, and logs."
             files={outputs}
             selectedFileId={selectedFileId}
             emptyMessage="Generated artifacts will appear here after a run finishes."
-            onSelect={(file) => setSelectedFileId(file.id)}
+            onSelect={handleSelectFile}
             onRename={setRenameTarget}
             onDelete={setDeleteTarget}
           />
         </div>
 
-        <MediaPreview file={selectedFile} />
+        <MediaPreview file={selectedFile} previewStartSec={previewStartSec} />
 
         <div className="space-y-6">
           <GeneratePanel
@@ -236,7 +267,14 @@ export default function ProjectDetailPage() {
             busy={jobBusy}
             onSubmit={handleCreateJob}
           />
-          <JobFeed jobs={project.jobs} files={project.files} onCancel={(job) => handleCancelJob(job.id)} />
+          <JobFeed
+            jobs={project.jobs}
+            files={project.files}
+            onCancel={(job) => handleCancelJob(job.id)}
+            onExportCandidate={handleExportCandidate}
+            onPreviewCandidate={handlePreviewCandidate}
+            onSelectFile={handleSelectFile}
+          />
         </div>
       </div>
 

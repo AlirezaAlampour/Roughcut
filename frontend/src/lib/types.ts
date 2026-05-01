@@ -36,10 +36,15 @@ export interface JobResult {
   transcript_file_id: string | null;
   subtitle_file_id: string | null;
   edit_plan_file_id: string | null;
+  candidate_manifest_file_id: string | null;
   log_file_id: string | null;
   notes_for_user: string[];
   transcript_preview: string | null;
   plan: Record<string, unknown> | null;
+  candidates: CandidateClip[];
+  candidate_count: number;
+  exported_candidate_id: string | null;
+  export: Record<string, unknown> | null;
 }
 
 export interface JobSummary {
@@ -118,6 +123,14 @@ export interface PresetConfig {
   shorts_behavior: string;
   cta_preservation: string;
   planner_hint: string;
+  target_clip_min_sec: number;
+  target_clip_max_sec: number;
+  target_clip_ideal_sec: number;
+  candidate_overlap_sec: number;
+  max_candidates: number;
+  scoring_weights: Record<string, number>;
+  caption_behavior: string;
+  export_mode: "vertical_9_16" | "source_aspect";
 }
 
 export interface PresetsResponse {
@@ -131,4 +144,36 @@ export interface JobCreateRequest {
   captions_enabled: boolean;
   generate_shorts: boolean;
   user_notes?: string;
+}
+
+export interface SubtitleSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface CandidateScoreBreakdown {
+  hook_strength: number;
+  self_containedness: number;
+  conflict_tension: number;
+  payoff_clarity: number;
+  novelty_interestingness: number;
+  niche_relevance: number;
+  verbosity_penalty: number;
+  overlap_duplication_penalty: number;
+}
+
+export interface CandidateClip {
+  id: string;
+  start_sec: number;
+  end_sec: number;
+  transcript_excerpt: string;
+  title: string;
+  hook_text: string;
+  rationale: string;
+  score_total: number;
+  score_breakdown: CandidateScoreBreakdown | null;
+  tags: string[];
+  duplicate_group: string | null;
+  subtitle_segments: SubtitleSegment[];
 }

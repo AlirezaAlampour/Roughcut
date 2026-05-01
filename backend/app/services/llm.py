@@ -32,9 +32,9 @@ def request_planner_completion(
     timeout_seconds: int,
 ) -> str:
     if not base_url:
-        raise RuntimeError("LLM base URL is missing. Update Settings before generating a rough cut.")
+        raise RuntimeError("LLM base URL is missing. Update Settings before generating shorts candidates.")
     if not model:
-        raise RuntimeError("Planner model is missing. Update Settings before generating a rough cut.")
+        raise RuntimeError("Planner model is missing. Update Settings before generating shorts candidates.")
 
     payload = {
         "model": model,
@@ -59,4 +59,3 @@ def request_planner_completion(
     if not text.strip():
         raise RuntimeError("Planner endpoint returned an empty response.")
     return text
-

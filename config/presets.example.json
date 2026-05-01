@@ -1,19 +1,32 @@
 {
   "items": [
     {
-      "id": "talking_head_clean",
-      "name": "Talking Head Clean",
-      "description": "Tighten a direct-to-camera video while keeping it natural and confident.",
+      "id": "tacdel_builder_story",
+      "name": "Tacdel Builder Story",
+      "description": "Find compact builder-story moments with a clear setup, friction point, and practical payoff.",
       "silence_threshold_db": -38,
-      "minimum_silence_duration": 0.45,
+      "minimum_silence_duration": 0.4,
       "filler_removal_aggressiveness": "medium",
       "cut_aggressiveness": "balanced",
-      "caption_style": "clean_minimal",
-      "zoom_rule": "Subtle punch-ins only on emphasis beats.",
-      "shorts_behavior": "Disabled by default unless the user asks for candidates.",
-      "cta_preservation": "Preserve intro hook and final CTA if present.",
-      "planner_hint": "Prioritize clarity, hooks, and a premium talking-head rhythm."
+      "caption_style": "shorts_clean",
+      "zoom_rule": "No automatic face tracking; export vertical shorts with safe centered framing.",
+      "shorts_behavior": "Generate several self-contained story candidates, not one final edit.",
+      "cta_preservation": "Preserve CTAs only when they make the short self-contained.",
+      "planner_hint": "Prioritize creator/building stories with a strong first sentence and concrete lesson.",
+      "target_clip_min_sec": 28,
+      "target_clip_max_sec": 75,
+      "target_clip_ideal_sec": 48,
+      "candidate_overlap_sec": 6,
+      "max_candidates": 12,
+      "scoring_weights": {
+        "hook_strength": 1.25,
+        "self_containedness": 1.15,
+        "conflict_tension": 1.1,
+        "payoff_clarity": 1.15,
+        "niche_relevance": 1.05
+      },
+      "caption_behavior": "burned_in_default",
+      "export_mode": "vertical_9_16"
     }
   ]
 }
-

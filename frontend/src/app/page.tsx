@@ -117,8 +117,8 @@ export default function ProjectsPage() {
     <div className="space-y-6 lg:space-y-7">
       <PageHeader
         eyebrow="Projects"
-        title="Rough cuts without the boring labor."
-        description="Create a project, upload raw media, let the local planner shape an edit plan, and get back a downloadable first pass you can actually use."
+        title="Find the shorts hiding in long videos."
+        description="Create a project, upload one long source, let the local planner rank candidate clips, and export vertical shorts with captions."
         actions={
           <Button size="lg" onClick={() => setCreateOpen(true)}>
             <Plus className="mr-2 size-4" />
@@ -146,7 +146,7 @@ export default function ProjectsPage() {
               <p className="panel-label">Empty State</p>
               <h2 className="mt-3 font-serif text-3xl tracking-tight text-foreground">Start with one clean project.</h2>
               <p className="mt-4 text-base leading-7 text-muted-foreground">
-                This app stays calm on purpose. Create a project, press <span className="rounded bg-muted px-2 py-1 text-xs">N</span> any time to make another, and keep everything organized around simple upload-to-output flows.
+                This app stays calm on purpose. Create a project, press <span className="rounded bg-muted px-2 py-1 text-xs">N</span> any time to make another, and keep everything organized around source-to-shorts review flows.
               </p>
             </div>
             <Button size="lg" onClick={() => setCreateOpen(true)}>
@@ -212,4 +212,3 @@ export default function ProjectsPage() {
     </div>
   );
 }
-

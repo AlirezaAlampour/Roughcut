@@ -18,7 +18,7 @@ const serif = Newsreader({
 
 export const metadata: Metadata = {
   title: process.env.NEXT_PUBLIC_APP_TITLE || "Roughcut",
-  description: "Local-first AI-assisted YouTube rough-cut editing."
+  description: "Local-first AI-assisted shorts candidate generation."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
