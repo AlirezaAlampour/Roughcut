@@ -68,6 +68,7 @@ class CandidateExportRenderTests(unittest.TestCase):
                 quality_preset="balanced",
                 export_mode="center_blur_fill",
                 blur_intensity=34,
+                hook_text="Local-first editing wins when the workflow stays boring.",
                 command_log_path=command_path,
             )
 
@@ -77,8 +78,18 @@ class CandidateExportRenderTests(unittest.TestCase):
         self.assertIn("gblur=sigma=34.0", filter_complex)
         self.assertIn("scale=1080:1920:force_original_aspect_ratio=decrease", filter_complex)
         self.assertIn("overlay=(W-w)/2:(H-h)/2", filter_complex)
+        self.assertIn("drawbox=", filter_complex)
+        self.assertIn("drawtext=textfile=", filter_complex)
         self.assertTrue(command_path.exists())
         self.assertIn("gblur=sigma=34.0", command_path.read_text())
+
+    def test_hook_overlay_text_uses_title_fallback_and_caps_line_count(self) -> None:
+        self.assertEqual(media.hook_overlay_text("", "Fallback title"), "Fallback title")
+        wrapped = media._wrap_hook_overlay_text(
+            "This is a longer hook that should still be trimmed into no more than three readable lines for the exported preview."
+        )
+        self.assertLessEqual(len(wrapped), 3)
+        self.assertTrue(all(line.strip() for line in wrapped))
 
     def test_word_timed_ass_captions_are_used_for_burned_caption_rendering(self) -> None:
         media.write_ass_karaoke(

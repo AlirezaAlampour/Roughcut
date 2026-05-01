@@ -936,6 +936,7 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
             quality_preset=payload.get("output_quality_preset", "balanced"),
             export_mode=export_mode,
             blur_intensity=blur_intensity,
+            hook_text=media.hook_overlay_text(candidate.hook_text, candidate.title),
             command_log_path=render_command_path,
         )
         _log_and_trace(

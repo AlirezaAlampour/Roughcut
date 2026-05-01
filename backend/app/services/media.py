@@ -6,6 +6,8 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import tempfile
+import textwrap
 from typing import Any
 
 from app.config import Settings
@@ -439,6 +441,77 @@ def _clamped_blur_sigma(blur_intensity: float) -> float:
     return round(max(0.0, min(float(blur_intensity or 0), 80.0)), 2)
 
 
+def hook_overlay_text(hook_text: str | None, fallback_text: str | None = None) -> str | None:
+    primary = re.sub(r"\s+", " ", (hook_text or "")).strip()
+    fallback = re.sub(r"\s+", " ", (fallback_text or "")).strip()
+    return primary or fallback or None
+
+
+def _wrap_hook_overlay_text(
+    value: str,
+    *,
+    max_lines: int = 3,
+    max_chars_per_line: int = 24,
+) -> list[str]:
+    normalized = re.sub(r"\s+", " ", value).strip()
+    if not normalized:
+        return []
+
+    lines = textwrap.wrap(
+        normalized,
+        width=max_chars_per_line,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    if len(lines) <= max_lines:
+        return lines
+
+    overflow = " ".join(lines[max_lines - 1 :]).strip()
+    return [*lines[: max_lines - 1], textwrap.shorten(overflow, width=max_chars_per_line + 6, placeholder="...")]
+
+
+def _escape_filter_value(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace(",", "\\,")
+        .replace("'", "\\'")
+    )
+
+
+def _hook_overlay_filter_chain(video_input: str, hook_lines: list[str], hook_line_paths: list[Path]) -> tuple[list[str], str]:
+    if not hook_lines or len(hook_lines) != len(hook_line_paths):
+        return [], video_input
+
+    font_size = 54
+    line_gap = 12
+    top_padding = 34
+    bottom_padding = 34
+    box_top = 96
+    longest_line = max(len(line) for line in hook_lines)
+    box_width = min(880, max(460, 140 + longest_line * 24))
+    box_height = top_padding + bottom_padding + len(hook_lines) * font_size + max(0, len(hook_lines) - 1) * line_gap
+
+    filters = [
+        f"{video_input}drawbox=x=(w-{box_width})/2:y={box_top}:w={box_width}:h={box_height}:color=white@0.97:t=fill[hookbox0]"
+    ]
+
+    current_label = "[hookbox0]"
+    for index, line_path in enumerate(hook_line_paths):
+        next_label = f"[hookbox{index + 1}]"
+        y_position = box_top + top_padding + index * (font_size + line_gap)
+        filters.append(
+            f"{current_label}drawtext=textfile={_escape_filter_value(line_path.as_posix())}:"
+            "reload=0:fix_bounds=1:fontcolor=black:"
+            f"fontsize={font_size}:"
+            "borderw=0:shadowx=0:shadowy=0:"
+            f"x=(w-text_w)/2:y={y_position}{next_label}"
+        )
+        current_label = next_label
+
+    return filters, current_label
+
+
 def _vertical_filter_chain(
     video_input: str,
     probe: dict[str, Any],
@@ -503,6 +576,7 @@ def render_short_clip(
     quality_preset: str,
     export_mode: str,
     blur_intensity: float = 30.0,
+    hook_text: str | None = None,
     command_log_path: Path | None = None,
 ) -> None:
     if end_sec <= start_sec:
@@ -516,62 +590,82 @@ def render_short_clip(
     duration = end_sec - start_sec
     filter_parts: list[str] = []
     audio_label = None
+    hook_line_paths: list[Path] = []
 
-    if has_video:
-        trimmed_video = f"[0:v]trim=start={start_sec}:end={end_sec},setpts=PTS-STARTPTS,"
-        if export_mode == "center_blur_fill":
-            chains, video_label = _center_blur_fill_filter_chain(trimmed_video, blur_intensity=blur_intensity)
-            filter_parts.extend(chains)
-        elif export_mode == "vertical_9_16":
-            chains, video_label = _vertical_filter_chain(trimmed_video, probe, blur_intensity=blur_intensity)
-            filter_parts.extend(chains)
+    try:
+        if has_video:
+            trimmed_video = f"[0:v]trim=start={start_sec}:end={end_sec},setpts=PTS-STARTPTS,"
+            if export_mode == "center_blur_fill":
+                chains, video_label = _center_blur_fill_filter_chain(trimmed_video, blur_intensity=blur_intensity)
+                filter_parts.extend(chains)
+            elif export_mode == "vertical_9_16":
+                chains, video_label = _vertical_filter_chain(trimmed_video, probe, blur_intensity=blur_intensity)
+                filter_parts.extend(chains)
+            else:
+                filter_parts.append(f"{trimmed_video}setsar=1[basev]")
+                video_label = "[basev]"
         else:
-            filter_parts.append(f"{trimmed_video}setsar=1[basev]")
+            filter_parts.append(f"color=c=#161616:s=1080x1920:d={duration},format=yuv420p[basev]")
             video_label = "[basev]"
-    else:
-        filter_parts.append(f"color=c=#161616:s=1080x1920:d={duration},format=yuv420p[basev]")
-        video_label = "[basev]"
 
-    if has_audio:
-        filter_parts.append(f"[0:a]atrim=start={start_sec}:end={end_sec},asetpts=PTS-STARTPTS[basea]")
-        audio_label = "[basea]"
+        if has_audio:
+            filter_parts.append(f"[0:a]atrim=start={start_sec}:end={end_sec},asetpts=PTS-STARTPTS[basea]")
+            audio_label = "[basea]"
 
-    final_video_label = video_label
-    if subtitle_file_is_usable(captions_path):
-        filter_parts.append(f"{video_label}{_subtitle_filter(captions_path)}[vout]")
-        final_video_label = "[vout]"
+        overlay_text = hook_overlay_text(hook_text)
+        if overlay_text:
+            hook_lines = _wrap_hook_overlay_text(overlay_text)
+            for line in hook_lines:
+                handle = tempfile.NamedTemporaryFile("w", suffix="-roughcut-hook.txt", delete=False, encoding="utf-8")
+                handle.write(line)
+                handle.flush()
+                handle.close()
+                hook_line_paths.append(Path(handle.name))
+            hook_filters, video_label = _hook_overlay_filter_chain(video_label, hook_lines, hook_line_paths)
+            filter_parts.extend(hook_filters)
 
-    preset, crf = _quality_args(quality_preset)
-    args = [
-        settings.ffmpeg_binary,
-        "-y",
-        "-i",
-        str(source_path),
-        "-filter_complex",
-        ";".join(filter_parts),
-        "-map",
-        final_video_label,
-    ]
-    if audio_label is not None:
-        args.extend(["-map", audio_label, "-c:a", "aac", "-b:a", "192k"])
+        final_video_label = video_label
+        if subtitle_file_is_usable(captions_path):
+            filter_parts.append(f"{video_label}{_subtitle_filter(captions_path)}[vout]")
+            final_video_label = "[vout]"
 
-    args.extend(
-        [
-            "-c:v",
-            "libx264",
-            "-preset",
-            preset,
-            "-crf",
-            crf,
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            str(output_path),
+        preset, crf = _quality_args(quality_preset)
+        args = [
+            settings.ffmpeg_binary,
+            "-y",
+            "-i",
+            str(source_path),
+            "-filter_complex",
+            ";".join(filter_parts),
+            "-map",
+            final_video_label,
         ]
-    )
-    _write_command_artifact(command_log_path, args)
-    _run(args)
+        if audio_label is not None:
+            args.extend(["-map", audio_label, "-c:a", "aac", "-b:a", "192k"])
+
+        args.extend(
+            [
+                "-c:v",
+                "libx264",
+                "-preset",
+                preset,
+                "-crf",
+                crf,
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+        )
+        _write_command_artifact(command_log_path, args)
+        _run(args)
+    finally:
+        for hook_line_path in hook_line_paths:
+            try:
+                hook_line_path.unlink(missing_ok=True)
+            except OSError:
+                continue
 
 
 def extract_thumbnail(settings: Settings, video_path: Path, output_path: Path, *, offset_seconds: float = 1.0) -> None:
