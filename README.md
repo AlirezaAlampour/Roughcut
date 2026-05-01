@@ -7,7 +7,7 @@ It is built for a single-user DGX Spark style setup:
 - browser UI on your main PC
 - media files stored on the local machine running the stack
 - faster-whisper transcription in the worker
-- a local OpenAI-compatible planner model
+- a local OpenAI-compatible or Ollama-native planner model
 - deterministic ffmpeg execution inside Docker containers
 
 Roughcut keeps its name, but the product focus is now source-to-shorts review:
@@ -156,12 +156,14 @@ Main runtime variables in `.env.example`:
 | --- | --- | --- |
 | `FRONTEND_PORT` | browser UI port | `3000` |
 | `BACKEND_PORT` | FastAPI port | `8000` |
+| `FRONTEND_BIND_HOST` | host interface for the published UI port | `0.0.0.0` |
+| `BACKEND_BIND_HOST` | host interface for the published API port | `0.0.0.0` |
 | `NEXT_PUBLIC_APP_TITLE` | UI title | `Roughcut` |
 | `VIDEO_AGENT_DATABASE_PATH` | SQLite DB path in container | `/data/app.db` |
 | `VIDEO_AGENT_STORAGE_ROOT` | project storage root in container | `/data/projects` |
 | `VIDEO_AGENT_CONFIG_ROOT` | config root in container | `/data/config` |
 | `VIDEO_AGENT_LOGS_ROOT` | logs root in container | `/data/logs` |
-| `VIDEO_AGENT_DEFAULT_LLM_BASE_URL` | planner base URL | `http://host.docker.internal:11434/v1` |
+| `VIDEO_AGENT_DEFAULT_LLM_BASE_URL` | planner base URL | `http://host.docker.internal:11434` |
 | `VIDEO_AGENT_DEFAULT_LLM_MODEL` | planner model name | `qwen3:32b` |
 | `VIDEO_AGENT_DEFAULT_PRESET` | default shorts preset | `tacdel_builder_story` |
 | `VIDEO_AGENT_DEFAULT_CUT_AGGRESSIVENESS` | default candidate density | `balanced` |
@@ -174,7 +176,7 @@ Main runtime variables in `.env.example`:
 | `VIDEO_AGENT_WORKER_POLL_INTERVAL_SECONDS` | worker polling interval | `2` |
 | `VIDEO_AGENT_LLM_REQUEST_TIMEOUT_SECONDS` | planner timeout | `180` |
 
-## Local Run
+## Dockerized Local and LAN Run
 
 Prepare env:
 
@@ -198,27 +200,89 @@ docker compose logs -f frontend
 docker compose down
 ```
 
-Open:
+Open on the Mac Studio:
 
 - UI: `http://localhost:3000`
 - API docs: `http://localhost:8000/docs`
 
-On another machine in the same trusted LAN, replace `localhost` with the host LAN IP.
+The default bind hosts are `0.0.0.0`, so Docker publishes the UI and API ports on all Mac host interfaces for trusted LAN use. To keep the stack local-only on the Mac, set these in `.env`:
+
+```bash
+FRONTEND_BIND_HOST=127.0.0.1
+BACKEND_BIND_HOST=127.0.0.1
+```
+
+For a stricter LAN deployment check, set `FRONTEND_BIND_HOST` and `BACKEND_BIND_HOST` to the actual Mac LAN or Tailscale IP. Docker will then fail fast if another service already owns that exact IP and port.
+
+### Mac Studio LAN Access
+
+Find the Mac Studio LAN IP:
+
+```bash
+MAC_LAN_IFACE=$(route get default | awk '/interface:/{print $2}')
+MAC_LAN_IP=$(ipconfig getifaddr "$MAC_LAN_IFACE")
+echo "$MAC_LAN_IP"
+```
+
+From another machine on the same trusted LAN or Tailscale network, open:
+
+- UI: `http://<MAC_LAN_IP>:3000`
+- API docs: `http://<MAC_LAN_IP>:8000/docs`
+
+If you changed `FRONTEND_PORT` or `BACKEND_PORT` in `.env`, use those ports instead.
+
+macOS Firewall may need to allow Docker Desktop or incoming connections for the published ports. Roughcut has no auth layer and is intended for a trusted LAN or private network such as Tailscale, not direct public internet exposure.
+
+### Deployment Verification Checklist
+
+```bash
+docker compose up --build -d
+docker compose ps
+curl http://localhost:8000/api/health
+curl http://<MAC_LAN_IP>:8000/api/health
+```
+
+Then open `http://<MAC_LAN_IP>:3000` from another machine on the same network.
+
+If the LAN URL opens a different app, another container or process may already be bound to that specific LAN IP and port. Check:
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
+lsof -nP -iTCP:3000 -sTCP:LISTEN
+lsof -nP -iTCP:8000 -sTCP:LISTEN
+```
+
+Stop the conflicting service or change `FRONTEND_PORT` / `BACKEND_PORT` in `.env`, then rerun `docker compose up -d`.
+
+The frontend calls relative `/api` and `/downloads` paths, and Next.js rewrites those requests to `http://backend:8000` inside the Docker network. This keeps browser access LAN-friendly while preserving simple frontend-to-backend container networking.
 
 ## Planner Configuration
 
-Roughcut expects an OpenAI-compatible chat endpoint.
+Roughcut supports either:
 
-Known-good Ollama-style setup:
+- an OpenAI-compatible chat endpoint
+- an Ollama-native endpoint
 
-- base URL: `http://host.docker.internal:11434/v1`
+Recommended local Mac/Docker setup:
+
+- base URL: `http://host.docker.internal:11434`
 - model: `qwen3:32b`
+
+You can still use a base URL that already ends in `/v1`. Roughcut normalizes the configured value and probes the local runtime in this order:
+
+- `GET /v1/models`
+- `GET /api/tags` if the OpenAI-compatible probe is missing or unavailable
+
+Planner requests then use:
+
+- `POST /v1/chat/completions` for OpenAI-compatible runtimes
+- `POST /api/chat` for Ollama-native runtimes
 
 Important:
 
-- use the OpenAI-compatible base URL, not Ollama's `/api/generate`
-- Roughcut appends `/v1/chat/completions` when needed
-- if Docker cannot reach Ollama, check host firewall rules for the Docker bridge subnet
+- `host.docker.internal` lets the backend and worker containers reach a model runtime running on the Mac host
+- do not point Roughcut at Ollama's legacy `/api/generate` route
+- if Docker cannot reach the host runtime, check macOS firewall rules and Docker-to-host access first
 
 ## Migration Notes
 
