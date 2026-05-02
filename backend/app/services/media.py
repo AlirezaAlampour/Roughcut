@@ -451,7 +451,7 @@ def _wrap_hook_overlay_text(
     value: str,
     *,
     max_lines: int = 3,
-    max_chars_per_line: int = 20,
+    max_chars_per_line: int = 18,
 ) -> list[str]:
     normalized = re.sub(r"\s+", " ", value).strip()
     if not normalized:
@@ -483,13 +483,13 @@ def _hook_overlay_filter_chain(video_input: str, hook_lines: list[str], hook_tex
     if not hook_lines or hook_text_path is None:
         return [], video_input
 
-    font_size = 58
-    line_gap = 8
-    top_padding = 28
-    bottom_padding = 28
-    box_top = 96
+    font_size = 52
+    line_gap = 6
+    top_padding = 36
+    bottom_padding = 34
+    box_top = 132
     longest_line = max(len(line) for line in hook_lines)
-    box_width = min(760, max(440, 180 + longest_line * 20))
+    box_width = min(700, max(420, 168 + longest_line * 18))
     box_height = top_padding + bottom_padding + len(hook_lines) * font_size + max(0, len(hook_lines) - 1) * line_gap
 
     filters = [
@@ -502,7 +502,7 @@ def _hook_overlay_filter_chain(video_input: str, hook_lines: list[str], hook_tex
         "reload=0:fix_bounds=1:text_shaping=1:"
         "font=Sans:fontcolor=0x101010:"
         f"fontsize={font_size}:"
-        "line_spacing=-10:borderw=0:shadowx=0:shadowy=1:shadowcolor=black@0.08:"
+        f"line_spacing={line_gap}:borderw=0:shadowx=0:shadowy=1:shadowcolor=black@0.06:"
         f"x=(w-text_w)/2:y={box_top}+({box_height}-text_h)/2[hookbox1]"
     )
 

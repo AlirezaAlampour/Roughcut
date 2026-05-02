@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { ChevronDown, Download, PanelRightOpen, Play, Sparkles } from "lucide-react";
+import { CloudUpload, Download, FolderOpen, History, PanelRightOpen, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { CandidateList } from "@/components/project/candidate-list";
@@ -25,11 +25,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NameDialog } from "@/components/ui/name-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
-import { formatBytes, formatDateTime, formatDuration, formatTimestamp } from "@/lib/format";
+import { formatDuration, formatTimestamp } from "@/lib/format";
 import type {
   CandidateClip,
   FileItem,
@@ -121,10 +121,6 @@ function candidateTitle(candidate: CandidateClip) {
   return candidate.title.trim() || candidate.hook_text.trim() || "Untitled candidate";
 }
 
-function candidateHook(candidate: CandidateClip) {
-  return candidate.hook_text.trim() || candidate.title.trim() || "";
-}
-
 function candidateSummary(candidate: CandidateClip) {
   return candidate.rationale.trim() || candidate.transcript_excerpt.trim() || candidate.hook_text.trim() || "Candidate summary unavailable.";
 }
@@ -175,6 +171,7 @@ export default function ProjectDetailPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const projectRequestRef = useRef(0);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [presets, setPresets] = useState<PresetConfig[]>([]);
@@ -192,8 +189,8 @@ export default function ProjectDetailPage() {
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(true);
-  const [runsOpen, setRunsOpen] = useState(false);
+  const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
+  const [runsDialogOpen, setRunsDialogOpen] = useState(false);
 
   async function loadProject() {
     const requestId = ++projectRequestRef.current;
@@ -302,18 +299,6 @@ export default function ProjectDetailPage() {
     return () => window.clearInterval(interval);
   }, [activeJobs.length, projectId]);
 
-  useEffect(() => {
-    if (uploads.length === 0) {
-      setLibraryOpen(true);
-    }
-  }, [uploads.length]);
-
-  useEffect(() => {
-    if (activeJobs.length > 0) {
-      setRunsOpen(true);
-    }
-  }, [activeJobs.length]);
-
   const uploadBusy = uploadPhase !== null;
 
   async function handleUpload(files: File[]) {
@@ -338,7 +323,6 @@ export default function ProjectDetailPage() {
       setSelectedCandidateId(null);
       setPreviewStartSec(null);
       setLibraryTab("uploads");
-      setLibraryOpen(true);
 
       await loadProject();
 
@@ -396,7 +380,6 @@ export default function ProjectDetailPage() {
       setSelectedFileId(payload.source_file_id);
       setPreviewStartSec(null);
       setInspectorOpen(false);
-      setRunsOpen(true);
       await loadProject();
       toast.success("Shorts candidate job queued.");
       return true;
@@ -410,7 +393,7 @@ export default function ProjectDetailPage() {
 
   async function handleQuickGenerate(sourceFile: FileItem | null, quickPreset: PresetConfig | null) {
     if (!sourceFile) {
-      setLibraryOpen(true);
+      setLibraryDialogOpen(true);
       toast.warning("Upload a source file before generating candidates.");
       return;
     }
@@ -446,7 +429,6 @@ export default function ProjectDetailPage() {
       setSelectedCandidateId(candidate.id);
       setSelectedFileId(job.source_file_id);
       setPreviewStartSec(candidate.start_sec);
-      setRunsOpen(true);
       await loadProject();
       toast.success("Short export queued.");
     } catch (error) {
@@ -470,6 +452,11 @@ export default function ProjectDetailPage() {
     setInspectorOpen(false);
   }
 
+  function handleSelectFileFromLibrary(file: FileItem) {
+    handleSelectFile(file);
+    setLibraryDialogOpen(false);
+  }
+
   function handleSelectRun(job: JobSummary) {
     const nextCandidate = selectedCandidateForJob(job, sortedJobs, selectedCandidateId);
     const nextFile = project ? primaryFileForJob(job, project.files) : null;
@@ -479,6 +466,11 @@ export default function ProjectDetailPage() {
     setSelectedFileId(nextFile?.id ?? job.source_file_id);
     setPreviewStartSec(nextFile && nextFile.id !== job.source_file_id ? null : nextCandidate?.start_sec ?? null);
     setInspectorOpen(false);
+  }
+
+  function handleSelectRunFromDialog(job: JobSummary) {
+    handleSelectRun(job);
+    setRunsDialogOpen(false);
   }
 
   function handleSelectCandidate(job: JobSummary, candidate: CandidateClip) {
@@ -497,8 +489,8 @@ export default function ProjectDetailPage() {
   if (loading) {
     return (
       <div className="flex flex-col gap-4 lg:h-full lg:overflow-y-auto lg:pr-1">
-        <Skeleton className="h-[170px] w-full rounded-[34px]" />
-        <Skeleton className="h-[210px] w-full rounded-[32px]" />
+        <Skeleton className="h-[148px] w-full rounded-[32px]" />
+        <Skeleton className="h-[560px] w-full rounded-[36px]" />
         <Skeleton className="h-[720px] w-full rounded-[36px]" />
       </div>
     );
@@ -520,267 +512,167 @@ export default function ProjectDetailPage() {
     candidateReviewJob && selectedCandidate ? candidateExportJobs(sortedJobs, candidateReviewJob.id, selectedCandidate.id) : [];
   const selectedCandidateActiveExport = selectedCandidateExportRuns.find((job) => job.status === "queued" || job.status === "running");
   const selectedCandidateClip = candidateClipFile(candidateReviewJob, selectedCandidate, sortedJobs, project.files);
-  const focusedPreviewFile = selectedCandidate ? selectedCandidateClip || candidateSourceFile || selectedFile : selectedFile;
+  const currentSourceFile = (selectedFile?.kind === "upload" ? selectedFile : null) || candidateSourceFile || uploads[0] || null;
+  const currentPresetId = candidateReviewJob?.preset_id ?? selectedJob?.preset_id ?? settings.default_preset;
+  const currentPreset =
+    presets.find((preset) => preset.id === currentPresetId) ||
+    presets.find((preset) => preset.id === settings.default_preset) ||
+    presets[0] ||
+    null;
+  const focusedPreviewFile = selectedCandidate ? selectedCandidateClip || candidateSourceFile || selectedFile || currentSourceFile : selectedFile || currentSourceFile;
   const focusedPreviewStartSec = selectedCandidate && !selectedCandidateClip ? selectedCandidate.start_sec : previewStartSec;
-  const downloadTarget = focusedPreviewFile || selectedFile;
-  const focusLabel = selectedCandidate ? candidateTitle(selectedCandidate) : selectedFile?.name || "Nothing selected";
-  const quickPreset = presets.find((preset) => preset.id === settings.default_preset) || presets[0] || null;
-  const quickSourceFile =
-    (selectedFile?.kind === "upload" ? selectedFile : null) || candidateSourceFile || uploads[0] || null;
+  const downloadTarget = selectedCandidateClip || focusedPreviewFile;
+  const uploadLabel =
+    uploadPhase === "processing"
+      ? "Finalizing upload"
+      : uploadPhase === "uploading" && uploadProgress !== null
+      ? `Uploading ${uploadProgress}%`
+      : "Upload";
+  const previewTitle = selectedCandidate
+    ? candidateTitle(selectedCandidate)
+    : focusedPreviewFile
+      ? focusedPreviewFile.name
+      : "Preview stage";
+  const previewDescription = selectedCandidate
+    ? candidateSummary(selectedCandidate)
+    : focusedPreviewFile
+      ? "Select a ranked clip below to retime this preview or export the result."
+      : "Upload one source, generate ranked clips, and use the gallery below as the main scan surface.";
+  const exportLabel = selectedCandidateActiveExport
+    ? "Exporting"
+    : selectedCandidateClip
+      ? "Re-export Selected"
+      : "Export Selected";
 
   return (
     <div className="flex flex-col gap-5 lg:h-full lg:overflow-y-auto lg:pr-1">
-      <div className="app-frame rounded-[32px] border border-border/70 px-5 py-5 shadow-soft">
+      <div className="sticky top-0 z-20 pb-1">
+        <div className="app-frame rounded-[32px] border border-border/70 px-5 py-4 shadow-soft backdrop-blur">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="panel-label">Project Workspace</p>
+                <Badge variant={activeJobs.length ? "warning" : "muted"}>{activeJobs.length ? `${activeJobs.length} active` : "idle"}</Badge>
+              </div>
+              <h1 className="mt-2 text-[1.8rem] font-semibold tracking-tight text-foreground">{project.name}</h1>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                <span className="rounded-full border border-border/70 bg-background/75 px-3 py-1.5 text-muted-foreground">
+                  Source: <span className="font-medium text-foreground">{currentSourceFile?.name || "Upload a source"}</span>
+                </span>
+                <span className="rounded-full border border-border/70 bg-background/75 px-3 py-1.5 text-muted-foreground">
+                  Preset: <span className="font-medium text-foreground">{currentPreset?.name || "Unavailable"}</span>
+                </span>
+                <span className="rounded-full border border-border/70 bg-background/75 px-3 py-1.5 text-muted-foreground">
+                  Selected: <span className="font-medium text-foreground">{selectedCandidate ? candidateTitle(selectedCandidate) : "Scan the gallery"}</span>
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                {uploadPhase === "processing"
+                  ? "Saving the upload and refreshing the project library."
+                  : uploadPhase === "uploading" && uploadProgress !== null
+                  ? `Upload is in progress at ${uploadProgress}%.`
+                  : "One obvious path: upload, generate, scan ranked clips, and export the winner."}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 xl:max-w-[700px] xl:justify-end">
+              <Button disabled={uploadBusy || jobBusy} onClick={() => uploadInputRef.current?.click()}>
+                <CloudUpload className="mr-2 size-4" />
+                {uploadLabel}
+              </Button>
+              <Button
+                disabled={!currentSourceFile || !currentPreset || jobBusy || uploadBusy}
+                onClick={() => void handleQuickGenerate(currentSourceFile, currentPreset)}
+              >
+                <Sparkles className="mr-2 size-4" />
+                {jobBusy ? "Generating..." : "Generate Shorts Candidates"}
+              </Button>
+              <Button
+                disabled={!selectedCandidate || !candidateReviewJob || Boolean(selectedCandidateActiveExport) || uploadBusy}
+                onClick={() => {
+                  if (selectedCandidate && candidateReviewJob) {
+                    void handleExportCandidate(candidateReviewJob, selectedCandidate);
+                  }
+                }}
+              >
+                <Download className="mr-2 size-4" />
+                {exportLabel}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setGenerateDialogOpen(true)}>
+                Options
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setLibraryDialogOpen(true)}>
+                <FolderOpen className="mr-2 size-4" />
+                Library
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setRunsDialogOpen(true)}>
+                <History className="mr-2 size-4" />
+                Runs
+              </Button>
+              {selectedCandidate && candidateReviewJob ? (
+                <Button variant="secondary" size="sm" onClick={() => handleOpenCandidateDetails(candidateReviewJob, selectedCandidate)}>
+                  <PanelRightOpen className="mr-2 size-4" />
+                  Details
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <input
+          ref={uploadInputRef}
+          hidden
+          multiple
+          accept="video/*,audio/*"
+          type="file"
+          onChange={(event) => {
+            const files = event.currentTarget.files;
+            if (files && files.length > 0) {
+              void handleUpload(Array.from(files));
+            }
+            event.currentTarget.value = "";
+          }}
+        />
+      </div>
+
+      <section className="space-y-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="panel-label">Project Workspace</p>
-              <Badge variant="muted">{project.status_summary.upload_count} uploads</Badge>
-              <Badge variant="muted">{project.status_summary.output_count} outputs</Badge>
-              <Badge variant={activeJobs.length ? "warning" : "muted"}>{activeJobs.length ? `${activeJobs.length} active` : "idle"}</Badge>
-            </div>
-            <h1 className="mt-2 text-[1.9rem] font-semibold tracking-tight text-foreground lg:text-[2.4rem]">{project.name}</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Created {formatDateTime(project.created_at)}. Upload once, generate ranked candidates, review clips, and export only the winners.
-            </p>
-          </div>
-
-          <div className="panel-inset rounded-[22px] px-4 py-3 xl:max-w-[320px]">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Current focus</p>
-            <p className="mt-2 truncate text-sm font-medium text-foreground">{focusLabel}</p>
-            <p className="mt-1 text-xs text-muted-foreground">Updated {formatDateTime(project.updated_at)}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="sticky top-0 z-20 pb-1">
-        <div className="rounded-[30px] border border-border/70 bg-background/94 p-3 shadow-soft backdrop-blur">
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.95fr)_minmax(0,0.95fr)]">
-            <UploadDropzone
-              compact
-              uploadPhase={uploadPhase}
-              uploadProgress={uploadProgress}
-              onFilesSelected={handleUpload}
-              disabled={uploadBusy || jobBusy}
-            />
-
-            <Card className="overflow-hidden">
-              <CardContent className="flex h-full flex-col gap-4 px-5 pb-5 pt-5">
-                <div>
-                  <p className="panel-label">Generate</p>
-                  <h2 className="mt-2 text-lg font-semibold text-foreground">Generate shorts candidates</h2>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {quickSourceFile
-                      ? `Uses ${quickSourceFile.name} with ${quickPreset?.name || "your default preset"}.`
-                      : "Choose or upload a source file to start a new ranked candidate run."}
-                  </p>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Source</p>
-                    <p className="mt-1 truncate text-sm font-medium text-foreground">{quickSourceFile?.name || "No source selected"}</p>
-                  </div>
-                  <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Default preset</p>
-                    <p className="mt-1 truncate text-sm font-medium text-foreground">{quickPreset?.name || "Unavailable"}</p>
-                  </div>
-                </div>
-
-                <div className="mt-auto flex flex-wrap gap-2">
-                  <Button
-                    disabled={!quickSourceFile || !quickPreset || jobBusy || uploadBusy}
-                    onClick={() => void handleQuickGenerate(quickSourceFile, quickPreset)}
-                  >
-                    <Sparkles className="mr-2 size-4" />
-                    {jobBusy ? "Generating..." : "Generate Shorts Candidates"}
-                  </Button>
-                  <Button variant="secondary" onClick={() => setGenerateDialogOpen(true)}>
-                    More options
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="overflow-hidden">
-              <CardContent className="flex h-full flex-col gap-4 px-5 pb-5 pt-5">
-                <div>
-                  <p className="panel-label">Export</p>
-                  <h2 className="mt-2 text-lg font-semibold text-foreground">Export selected clip</h2>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {selectedCandidate
-                      ? candidateTitle(selectedCandidate)
-                      : "Pick a ranked candidate below and its export action stays parked here."}
-                  </p>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Status</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">
-                      {selectedCandidateActiveExport ? "Exporting now" : selectedCandidateClip ? "Clip ready" : "Not exported"}
-                    </p>
-                  </div>
-                  <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Range</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">
-                      {selectedCandidate
-                        ? `${formatTimestamp(selectedCandidate.start_sec, 1)} - ${formatTimestamp(selectedCandidate.end_sec, 1)}`
-                        : "Select a candidate"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-auto flex flex-wrap gap-2">
-                  <Button
-                    disabled={!selectedCandidate || !candidateReviewJob || Boolean(selectedCandidateActiveExport) || uploadBusy}
-                    onClick={() => {
-                      if (selectedCandidate && candidateReviewJob) {
-                        void handleExportCandidate(candidateReviewJob, selectedCandidate);
-                      }
-                    }}
-                  >
-                    <Sparkles className="mr-2 size-4" />
-                    {selectedCandidateActiveExport ? "Exporting" : selectedCandidateClip ? "Re-export Selected" : "Export Selected"}
-                  </Button>
-                  {selectedCandidate && candidateReviewJob ? (
-                    <Button variant="secondary" onClick={() => handleOpenCandidateDetails(candidateReviewJob, selectedCandidate)}>
-                      <PanelRightOpen className="mr-2 size-4" />
-                      Details
-                    </Button>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </div>
-
-      <MediaPreview file={focusedPreviewFile} previewStartSec={focusedPreviewStartSec} />
-
-      <Card className="overflow-hidden">
-        <CardContent className="px-5 pb-5 pt-5">
-          {selectedCandidate && candidateReviewJob ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge>{Math.round(selectedCandidate.score_total)} score</Badge>
-                {selectedCandidateClip ? <Badge variant="success">Rendered</Badge> : null}
-                {selectedCandidateActiveExport ? <Badge variant="warning">Exporting</Badge> : null}
-                {selectedCandidate.duplicate_group ? <Badge variant="muted">duplicate {selectedCandidate.duplicate_group}</Badge> : null}
-              </div>
-
-              <div>
-                <p className="panel-label">Focused clip</p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{candidateTitle(selectedCandidate)}</h2>
-                {candidateHook(selectedCandidate) ? (
-                  <p className="mt-2 text-sm font-medium leading-6 text-foreground">{candidateHook(selectedCandidate)}</p>
-                ) : null}
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">{candidateSummary(selectedCandidate)}</p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Duration</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">
-                    {formatDuration(selectedCandidate.end_sec - selectedCandidate.start_sec)}
-                  </p>
-                </div>
-                <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Clip range</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">
-                    {formatTimestamp(selectedCandidate.start_sec, 1)} - {formatTimestamp(selectedCandidate.end_sec, 1)}
-                  </p>
-                </div>
-                <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Source file</p>
-                  <p className="mt-1 truncate text-sm font-medium text-foreground">{candidateSourceFile?.name || "Unavailable"}</p>
-                </div>
-                <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Output</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">
-                    {selectedCandidateClip ? "Rendered clip ready" : selectedCandidateActiveExport ? "Rendering" : "Export not started"}
-                  </p>
-                </div>
-              </div>
-
-              {selectedCandidate.tags.length ? (
-                <div className="flex flex-wrap gap-2">
-                  {selectedCandidate.tags.map((tag) => (
-                    <Badge key={tag} variant="muted">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
+              <p className="panel-label">Preview Stage</p>
+              {selectedCandidate ? <Badge>{Math.round(selectedCandidate.score_total)} score</Badge> : null}
+              {selectedCandidateClip ? <Badge variant="success">Rendered</Badge> : null}
+              {selectedCandidateActiveExport ? <Badge variant="warning">Exporting</Badge> : null}
+              {selectedCandidate ? (
+                <Badge variant="muted">
+                  {formatDuration(selectedCandidate.end_sec - selectedCandidate.start_sec)} at{" "}
+                  {formatTimestamp(selectedCandidate.start_sec, 1)}
+                </Badge>
               ) : null}
-
-              <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={() => handlePreviewCandidate(candidateReviewJob, selectedCandidate)}>
-                  <Play className="mr-2 size-4" />
-                  Source preview
-                </Button>
-                <Button variant="secondary" onClick={() => handleOpenCandidateDetails(candidateReviewJob, selectedCandidate)}>
-                  <PanelRightOpen className="mr-2 size-4" />
-                  Open details
-                </Button>
-                {downloadTarget ? (
-                  <Button variant="secondary" asChild>
-                    <a href={downloadTarget.download_url} download>
-                      <Download className="mr-2 size-4" />
-                      {selectedCandidateClip ? "Download clip" : "Download focus"}
-                    </a>
-                  </Button>
-                ) : null}
-              </div>
             </div>
-          ) : selectedFile ? (
-            <div className="space-y-4">
-              <div>
-                <p className="panel-label">Focused media</p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{selectedFile.name}</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Review the source or output here, then drop into the ranked gallery when you want to pick a clip.
-                </p>
-              </div>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{previewTitle}</h2>
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">{previewDescription}</p>
+          </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Kind</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{selectedFile.kind === "upload" ? "Source upload" : "Generated output"}</p>
-                </div>
-                <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Type</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{selectedFile.media_type}</p>
-                </div>
-                <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Size</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{formatBytes(selectedFile.size_bytes)}</p>
-                </div>
-                <div className="panel-inset rounded-[20px] px-3.5 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Duration</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{formatDuration(selectedFile.duration_seconds)}</p>
-                </div>
-              </div>
+          <div className="flex flex-wrap gap-2">
+            {selectedCandidate && candidateReviewJob ? (
+              <Button variant="secondary" onClick={() => handleOpenCandidateDetails(candidateReviewJob, selectedCandidate)}>
+                <PanelRightOpen className="mr-2 size-4" />
+                Open details
+              </Button>
+            ) : null}
+            {downloadTarget ? (
+              <Button variant="secondary" asChild>
+                <a href={downloadTarget.download_url} download>
+                  <Download className="mr-2 size-4" />
+                  {selectedCandidateClip ? "Download clip" : "Download focus"}
+                </a>
+              </Button>
+            ) : null}
+          </div>
+        </div>
 
-              <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" asChild>
-                  <a href={selectedFile.download_url} download>
-                    <Download className="mr-2 size-4" />
-                    Download file
-                  </a>
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-[24px] border border-dashed border-border/70 bg-card/60 px-5 py-6 text-center">
-              <p className="panel-label">Focused review</p>
-              <h2 className="mt-2 text-xl font-semibold text-foreground">Upload a source or select a candidate</h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                The preview stays first, the ranked gallery stays second, and deeper transcript or trace details stay tucked behind the detail drawer.
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        <MediaPreview file={focusedPreviewFile} previewStartSec={focusedPreviewStartSec} showHeader={false} showMetadata={false} />
+      </section>
 
       <CandidateList
         sourceJob={candidateReviewJob}
@@ -794,77 +686,96 @@ export default function ProjectDetailPage() {
         onOpenDetails={handleOpenCandidateDetails}
       />
 
-      <details
-        open={libraryOpen}
-        onToggle={(event) => setLibraryOpen(event.currentTarget.open)}
-        className="group rounded-[30px] border border-border/70 bg-card/76 p-3 shadow-soft [&_summary::-webkit-details-marker]:hidden"
-      >
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-[20px] px-2 py-1.5">
-          <div>
-            <p className="panel-label">Library</p>
-            <p className="mt-1 text-sm font-medium text-foreground">Uploads and generated outputs</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="muted">{libraryFiles.length}</Badge>
-            <ChevronDown className="size-4 text-muted-foreground transition group-open:rotate-180" />
-          </div>
-        </summary>
+      <Dialog open={libraryDialogOpen} onOpenChange={setLibraryDialogOpen}>
+        <DialogContent className="left-auto right-5 top-5 h-[calc(100vh-2.5rem)] w-[min(94vw,820px)] max-w-none -translate-x-0 -translate-y-0 overflow-hidden p-0">
+          <div className="flex h-full flex-col">
+            <DialogHeader className="border-b border-border/70 px-6 py-5 pr-14">
+              <DialogTitle>Project library</DialogTitle>
+              <DialogDescription>Manage source uploads and exported artifacts without crowding the main review flow.</DialogDescription>
+            </DialogHeader>
 
-        <div className="mt-3">
-          <FileList
-            className="rounded-none border-0 bg-transparent shadow-none"
-            contentClassName="px-1 pb-1 pt-0"
-            listClassName="pb-1"
-            title="Project library"
-            description={
-              libraryTab === "uploads"
-                ? `${uploads.length} source file${uploads.length === 1 ? "" : "s"} ready for review.`
-                : `${outputs.length} generated artifact${outputs.length === 1 ? "" : "s"} in this project.`
-            }
-            actions={
-              <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 p-1">
-                <Button type="button" size="sm" variant={libraryTab === "uploads" ? "default" : "ghost"} onClick={() => setLibraryTab("uploads")}>
-                  Uploads
-                </Button>
-                <Button type="button" size="sm" variant={libraryTab === "outputs" ? "default" : "ghost"} onClick={() => setLibraryTab("outputs")}>
-                  Outputs
-                </Button>
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+              <div className="space-y-4">
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+                  <UploadDropzone
+                    compact
+                    uploadPhase={uploadPhase}
+                    uploadProgress={uploadProgress}
+                    onFilesSelected={handleUpload}
+                    disabled={uploadBusy || jobBusy}
+                  />
+
+                  <div className="panel-gradient rounded-[28px] border border-border/70 p-4 shadow-soft">
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="panel-inset rounded-[18px] px-3 py-3">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Uploads</p>
+                        <p className="mt-2 text-base font-semibold text-foreground">{uploads.length}</p>
+                      </div>
+                      <div className="panel-inset rounded-[18px] px-3 py-3">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Outputs</p>
+                        <p className="mt-2 text-base font-semibold text-foreground">{outputs.length}</p>
+                      </div>
+                      <div className="panel-inset rounded-[18px] px-3 py-3">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Runs</p>
+                        <p className="mt-2 text-base font-semibold text-foreground">{sortedJobs.length}</p>
+                      </div>
+                    </div>
+
+                    <div className="panel-inset mt-3 rounded-[20px] px-4 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Current source</p>
+                      <p className="mt-1 truncate text-sm font-medium text-foreground">{currentSourceFile?.name || "No source selected"}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <FileList
+                  title="Project library"
+                  description={
+                    libraryTab === "uploads"
+                      ? `${uploads.length} source file${uploads.length === 1 ? "" : "s"} ready for review.`
+                      : `${outputs.length} generated artifact${outputs.length === 1 ? "" : "s"} in this project.`
+                  }
+                  actions={
+                    <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 p-1">
+                      <Button type="button" size="sm" variant={libraryTab === "uploads" ? "default" : "ghost"} onClick={() => setLibraryTab("uploads")}>
+                        Uploads
+                      </Button>
+                      <Button type="button" size="sm" variant={libraryTab === "outputs" ? "default" : "ghost"} onClick={() => setLibraryTab("outputs")}>
+                        Outputs
+                      </Button>
+                    </div>
+                  }
+                  files={libraryFiles}
+                  selectedFileId={selectedFileId}
+                  emptyMessage={
+                    libraryTab === "uploads"
+                      ? "Use the sticky upload action or the dropzone above to add source media."
+                      : "Generated artifacts will appear here after exports finish."
+                  }
+                  onSelect={handleSelectFileFromLibrary}
+                  onRename={setRenameTarget}
+                  onDelete={setDeleteTarget}
+                />
               </div>
-            }
-            files={libraryFiles}
-            selectedFileId={selectedFileId}
-            emptyMessage={
-              libraryTab === "uploads"
-                ? "Use the sticky upload action above to bring in source media."
-                : "Generated artifacts will appear here after a run finishes."
-            }
-            onSelect={handleSelectFile}
-            onRename={setRenameTarget}
-            onDelete={setDeleteTarget}
-          />
-        </div>
-      </details>
-
-      <details
-        open={runsOpen}
-        onToggle={(event) => setRunsOpen(event.currentTarget.open)}
-        className="group rounded-[30px] border border-border/70 bg-card/76 p-3 shadow-soft [&_summary::-webkit-details-marker]:hidden"
-      >
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-[20px] px-2 py-1.5">
-          <div>
-            <p className="panel-label">Runs</p>
-            <p className="mt-1 text-sm font-medium text-foreground">Recent candidate and export activity</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Badge variant={activeJobs.length ? "warning" : "muted"}>{activeJobs.length ? `${activeJobs.length} active` : sortedJobs.length}</Badge>
-            <ChevronDown className="size-4 text-muted-foreground transition group-open:rotate-180" />
-          </div>
-        </summary>
+        </DialogContent>
+      </Dialog>
 
-        <div className="mt-3">
-          <JobFeed jobs={sortedJobs} selectedJobId={selectedJobId} onSelectJob={handleSelectRun} onCancel={(job) => handleCancelJob(job.id)} />
-        </div>
-      </details>
+      <Dialog open={runsDialogOpen} onOpenChange={setRunsDialogOpen}>
+        <DialogContent className="left-auto right-5 top-5 h-[calc(100vh-2.5rem)] w-[min(92vw,720px)] max-w-none -translate-x-0 -translate-y-0 overflow-hidden p-0">
+          <div className="flex h-full flex-col">
+            <DialogHeader className="border-b border-border/70 px-6 py-5 pr-14">
+              <DialogTitle>Recent runs</DialogTitle>
+              <DialogDescription>Inspect candidate generation and export activity without leaving the gallery workflow.</DialogDescription>
+            </DialogHeader>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+              <JobFeed jobs={sortedJobs} selectedJobId={selectedJobId} onSelectJob={handleSelectRunFromDialog} onCancel={(job) => handleCancelJob(job.id)} />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
         <DialogContent className="max-w-[780px] overflow-hidden p-0">
@@ -872,7 +783,7 @@ export default function ProjectDetailPage() {
             className="rounded-none border-0 shadow-none"
             uploads={uploads}
             presets={presets}
-            defaultPreset={settings.default_preset}
+            defaultPreset={currentPreset?.id || settings.default_preset}
             defaultAggressiveness={settings.cut_aggressiveness}
             defaultCaptions={settings.captions_enabled}
             busy={jobBusy || uploadBusy}

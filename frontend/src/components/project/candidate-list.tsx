@@ -192,6 +192,7 @@ export function CandidateList({
           .map((candidate) => candidate.id)
       : []
   );
+  const renderedCount = renderedCandidateIds.size;
 
   const filteredCandidates = [...candidates]
     .filter((candidate) => matchesQuery(candidate, query))
@@ -220,13 +221,6 @@ export function CandidateList({
       return candidates.findIndex((candidate) => candidate.id === left.id) - candidates.findIndex((candidate) => candidate.id === right.id);
     });
 
-  const activeCandidate =
-    selectedCandidate ||
-    (selectedCandidateId ? candidates.find((candidate) => candidate.id === selectedCandidateId) : null) ||
-    filteredCandidates[0] ||
-    candidates[0] ||
-    null;
-
   return (
     <Card className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
       <CardHeader className="border-b border-border/60 pb-5">
@@ -238,7 +232,7 @@ export function CandidateList({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="muted">{candidates.length ? `${filteredCandidates.length}/${candidates.length}` : "Idle"}</Badge>
-              {activeCandidate ? <Badge>{Math.round(activeCandidate.score_total)} focus score</Badge> : null}
+              {renderedCount ? <Badge variant="muted">{renderedCount} rendered</Badge> : null}
             </div>
           </div>
 
@@ -256,17 +250,16 @@ export function CandidateList({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 p-1">
-                    <Button size="sm" variant={filter === "all" ? "default" : "ghost"} onClick={() => setFilter("all")}>
-                      All
-                    </Button>
-                    <Button size="sm" variant={filter === "fresh" ? "default" : "ghost"} onClick={() => setFilter("fresh")}>
-                      Fresh
-                    </Button>
-                    <Button size="sm" variant={filter === "rendered" ? "default" : "ghost"} onClick={() => setFilter("rendered")}>
-                      Rendered
-                    </Button>
-                  </div>
+                  <Select value={filter} onValueChange={(value) => setFilter(value as CandidateFilter)}>
+                    <SelectTrigger className="h-10 w-[152px] rounded-[18px] border-border/70 bg-background/70">
+                      <SelectValue placeholder="View clips" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">View: all</SelectItem>
+                      <SelectItem value="fresh">View: fresh</SelectItem>
+                      <SelectItem value="rendered">View: rendered</SelectItem>
+                    </SelectContent>
+                  </Select>
 
                   <Select value={sortBy} onValueChange={(value) => setSortBy(value as CandidateSort)}>
                     <SelectTrigger className="h-10 w-[170px] rounded-[18px] border-border/70 bg-background/70">

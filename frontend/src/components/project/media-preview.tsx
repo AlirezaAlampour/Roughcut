@@ -7,8 +7,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatBytes, formatDuration } from "@/lib/format";
 import type { FileItem } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-export function MediaPreview({ file, previewStartSec }: { file?: FileItem | null; previewStartSec?: number | null }) {
+interface MediaPreviewProps {
+  file?: FileItem | null;
+  previewStartSec?: number | null;
+  showHeader?: boolean;
+  showMetadata?: boolean;
+  className?: string;
+}
+
+export function MediaPreview({
+  file,
+  previewStartSec,
+  showHeader = true,
+  showMetadata = true,
+  className
+}: MediaPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const isVideo = file?.mime_type?.startsWith("video/");
   const isAudio = file?.mime_type?.startsWith("audio/");
@@ -26,7 +41,7 @@ export function MediaPreview({ file, previewStartSec }: { file?: FileItem | null
 
   if (!file) {
     return (
-      <Card className="overflow-hidden">
+      <Card className={cn("overflow-hidden", className)}>
         <CardContent className="flex min-h-[360px] flex-1 flex-col items-center justify-center gap-4 text-center">
           <div className="flex size-16 items-center justify-center rounded-3xl bg-muted text-muted-foreground">
             <Film className="size-7" />
@@ -43,17 +58,19 @@ export function MediaPreview({ file, previewStartSec }: { file?: FileItem | null
   }
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="gap-3 border-b border-border/60 pb-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="panel-label">{file.kind === "upload" ? "Source Media" : "Generated Output"}</p>
-            <CardTitle className="mt-2 truncate text-[1.7rem] font-medium tracking-tight">{file.name}</CardTitle>
+    <Card className={cn("overflow-hidden", className)}>
+      {showHeader ? (
+        <CardHeader className="gap-3 border-b border-border/60 pb-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="panel-label">{file.kind === "upload" ? "Source Media" : "Generated Output"}</p>
+              <CardTitle className="mt-2 truncate text-[1.7rem] font-medium tracking-tight">{file.name}</CardTitle>
+            </div>
+            <Badge variant="muted">{file.role.replace(/_/g, " ")}</Badge>
           </div>
-          <Badge variant="muted">{file.role.replace(/_/g, " ")}</Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6 overflow-hidden">
+        </CardHeader>
+      ) : null}
+      <CardContent className={cn("flex flex-col gap-6 overflow-hidden", showHeader ? "" : "px-5 pb-5 pt-5")}>
         <div className="flex min-h-[340px] items-center justify-center overflow-hidden rounded-[30px] border border-border/70 bg-[radial-gradient(circle_at_top,rgba(206,188,155,0.08),transparent_34%),linear-gradient(180deg,rgba(11,10,9,0.72),rgba(11,10,9,0.96))] lg:min-h-[520px]">
           {isVideo ? (
             <video
@@ -90,26 +107,28 @@ export function MediaPreview({ file, previewStartSec }: { file?: FileItem | null
           )}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-[24px] border border-border/60 bg-card/70 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Type</p>
-            <p className="mt-2 text-sm font-medium text-foreground">{file.media_type}</p>
+        {showMetadata ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-[24px] border border-border/60 bg-card/70 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Type</p>
+              <p className="mt-2 text-sm font-medium text-foreground">{file.media_type}</p>
+            </div>
+            <div className="rounded-[24px] border border-border/60 bg-card/70 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Size</p>
+              <p className="mt-2 text-sm font-medium text-foreground">{formatBytes(file.size_bytes)}</p>
+            </div>
+            <div className="rounded-[24px] border border-border/60 bg-card/70 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Duration</p>
+              <p className="mt-2 text-sm font-medium text-foreground">{formatDuration(file.duration_seconds)}</p>
+            </div>
+            <div className="rounded-[24px] border border-border/60 bg-card/70 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Resolution</p>
+              <p className="mt-2 text-sm font-medium text-foreground">
+                {file.width && file.height ? `${file.width} × ${file.height}` : "N/A"}
+              </p>
+            </div>
           </div>
-          <div className="rounded-[24px] border border-border/60 bg-card/70 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Size</p>
-            <p className="mt-2 text-sm font-medium text-foreground">{formatBytes(file.size_bytes)}</p>
-          </div>
-          <div className="rounded-[24px] border border-border/60 bg-card/70 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Duration</p>
-            <p className="mt-2 text-sm font-medium text-foreground">{formatDuration(file.duration_seconds)}</p>
-          </div>
-          <div className="rounded-[24px] border border-border/60 bg-card/70 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Resolution</p>
-            <p className="mt-2 text-sm font-medium text-foreground">
-              {file.width && file.height ? `${file.width} × ${file.height}` : "N/A"}
-            </p>
-          </div>
-        </div>
+        ) : null}
       </CardContent>
     </Card>
   );
