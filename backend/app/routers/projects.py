@@ -9,10 +9,13 @@ from app.config import get_settings
 from app.db import get_db
 from app.schemas import (
     CandidateExportRequest,
+    ClipStyleSaveRequest,
     FileItem,
     FileRenameRequest,
     JobCreateRequest,
     JobSummary,
+    ProjectClipStyle,
+    ProjectClipStyleDefaults,
     ProjectCreateRequest,
     ProjectDetail,
     ProjectSummary,
@@ -65,6 +68,7 @@ def get_project(project_id: str, conn: sqlite3.Connection = Depends(get_db)) -> 
             **project,
             "files": repository.list_project_files(conn, project_id),
             "jobs": repository.list_project_jobs(conn, project_id),
+            "clip_styles": repository.list_project_clip_styles(conn, project_id),
         }
     )
 
@@ -296,6 +300,17 @@ def export_candidate(
         raise HTTPException(status_code=400, detail="Unknown preset.")
     effective_settings = repository.get_effective_settings(conn, config)
     captions_enabled = candidate_job["captions_enabled"] if payload.captions_enabled is None else payload.captions_enabled
+    saved_clip_style = repository.get_project_clip_style(conn, project_id, job_id, candidate_id)
+    project_style_defaults = repository.get_project_clip_style_defaults(conn, project_id)
+    effective_style_overrides = (
+        payload.style_overrides.model_dump(exclude_none=True)
+        if payload.style_overrides
+        else saved_clip_style["style_overrides"]
+        if saved_clip_style is not None
+        else project_style_defaults["style_overrides"]
+        if project_style_defaults is not None
+        else None
+    )
 
     export_job = repository.create_job(
         conn,
@@ -313,9 +328,62 @@ def export_candidate(
             "captions_enabled": bool(captions_enabled),
             "output_quality_preset": effective_settings["output_quality_preset"],
             "export_mode": preset.export_mode,
+            "style_overrides": effective_style_overrides,
             "preset": preset.model_dump(),
         },
         kind="short_export",
     )
     storage.sync_project_manifest(conn, config, project_id)
     return JobSummary.model_validate(export_job)
+
+
+@router.put("/{project_id}/jobs/{job_id}/candidates/{candidate_id}/style", response_model=ProjectClipStyle | None)
+def save_candidate_clip_style(
+    project_id: str,
+    job_id: str,
+    candidate_id: str,
+    payload: ClipStyleSaveRequest,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ProjectClipStyle | None:
+    project = repository.get_project(conn, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    candidate_job = repository.get_job(conn, job_id)
+    if candidate_job is None or candidate_job["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Candidate generation job not found.")
+    if candidate_job["kind"] != "shorts_candidate_generation" or candidate_job["result"] is None:
+        raise HTTPException(status_code=409, detail="Candidate styles can only be saved for completed candidate runs.")
+
+    candidate = next((item for item in candidate_job["result"].candidates if item.id == candidate_id), None)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Candidate not found.")
+
+    record = repository.save_project_clip_style(
+        conn,
+        project_id=project_id,
+        source_candidate_job_id=job_id,
+        candidate_id=candidate_id,
+        style_overrides=payload.style_overrides.model_dump(exclude_none=True) if payload.style_overrides else None,
+    )
+    storage.sync_project_manifest(conn, get_settings(), project_id)
+    return ProjectClipStyle.model_validate(record) if record is not None else None
+
+
+@router.put("/{project_id}/clip-style-defaults", response_model=ProjectClipStyleDefaults | None)
+def save_project_clip_style_defaults(
+    project_id: str,
+    payload: ClipStyleSaveRequest,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> ProjectClipStyleDefaults | None:
+    project = repository.get_project(conn, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    record = repository.save_project_clip_style_defaults(
+        conn,
+        project_id=project_id,
+        style_overrides=payload.style_overrides.model_dump(exclude_none=True) if payload.style_overrides else None,
+    )
+    storage.sync_project_manifest(conn, get_settings(), project_id)
+    return ProjectClipStyleDefaults.model_validate(record) if record is not None else None

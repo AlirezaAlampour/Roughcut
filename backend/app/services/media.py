@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fractions import Fraction
 import json
+import math
 from pathlib import Path
 import re
 import shlex
@@ -308,11 +309,6 @@ def _caption_group_lines(
     max_lines: int,
     max_words_per_line: int,
 ) -> str:
-    if max_lines <= 1 or len(group) <= max_words_per_line:
-        split_index = len(group)
-    else:
-        split_index = min(max_words_per_line, (len(group) + 1) // 2)
-
     rendered: list[str] = []
     for index, word in enumerate(group):
         token = _escape_ass_text(word.word)
@@ -320,9 +316,24 @@ def _caption_group_lines(
             token = f"{{\\c{active_color}\\b1}}{token}{{\\c{base_color}\\b1}}"
         rendered.append(token)
 
-    if split_index >= len(rendered):
+    if max_lines <= 1 or len(rendered) <= max_words_per_line:
         return " ".join(rendered)
-    return " ".join(rendered[:split_index]) + r"\N" + " ".join(rendered[split_index:])
+
+    line_count = min(max_lines, max(1, math.ceil(len(rendered) / max_words_per_line)))
+    line_ranges: list[tuple[int, int]] = []
+    cursor = 0
+    words_remaining = len(rendered)
+    lines_remaining = line_count
+
+    while cursor < len(rendered):
+        take = min(max_words_per_line, max(1, math.ceil(words_remaining / max(lines_remaining, 1))))
+        next_cursor = min(len(rendered), cursor + take)
+        line_ranges.append((cursor, next_cursor))
+        words_remaining -= next_cursor - cursor
+        lines_remaining -= 1
+        cursor = next_cursor
+
+    return r"\N".join(" ".join(rendered[start:end]) for start, end in line_ranges if start < end)
 
 
 def write_ass_karaoke(
@@ -331,16 +342,24 @@ def write_ass_karaoke(
     *,
     base_color: str = "#FFFFFF",
     active_word_color: str = "#FFE15D",
+    font_size: int = 78,
     vertical_position: str = "lower",
+    bottom_offset: int | None = None,
     max_lines: int = 2,
     max_words_per_line: int = 4,
+    outline_strength: float = 5,
+    shadow_strength: float = 2,
 ) -> None:
     base_ass_color = _ass_color(base_color, "#FFFFFF")
     active_ass_color = _ass_color(active_word_color, "#FFE15D")
     outline_color = "&H00080808&"
-    margin_v = 420 if vertical_position == "lower_middle" else 300
-    max_lines = max(1, min(2, int(max_lines or 2)))
+    margin_v = int(bottom_offset if bottom_offset is not None else (420 if vertical_position == "lower_middle" else 300))
+    font_size = max(36, min(120, int(font_size or 78)))
+    margin_v = max(120, min(760, margin_v))
+    max_lines = max(1, min(3, int(max_lines or 2)))
     max_words_per_line = max(2, min(6, int(max_words_per_line or 4)))
+    outline_strength = round(max(0.0, min(float(outline_strength or 0), 12.0)), 2)
+    shadow_strength = round(max(0.0, min(float(shadow_strength or 0), 8.0)), 2)
 
     lines = [
         "[Script Info]",
@@ -352,7 +371,7 @@ def write_ass_karaoke(
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: ShortsDefault,Arial,78,{base_ass_color},{active_ass_color},{outline_color},&H85000000&,-1,0,0,0,100,100,0,0,1,5,2,2,80,80,{margin_v},1",
+        f"Style: ShortsDefault,Arial,{font_size},{base_ass_color},{active_ass_color},{outline_color},&H85000000&,-1,0,0,0,100,100,0,0,1,{outline_strength},{shadow_strength},2,80,80,{margin_v},1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -479,21 +498,48 @@ def _escape_filter_value(value: str) -> str:
     )
 
 
-def _hook_overlay_filter_chain(video_input: str, hook_lines: list[str], hook_text_path: Path | None) -> tuple[list[str], str]:
+def _hook_chars_per_line(*, box_width: int | None, font_size: int, box_padding: int) -> int:
+    usable_width = max(240, int((box_width or 620) - box_padding * 2))
+    estimated = usable_width / max(font_size * 0.56, 12)
+    return max(10, min(28, int(estimated)))
+
+
+def _hook_overlay_filter_chain(
+    video_input: str,
+    hook_lines: list[str],
+    hook_text_path: Path | None,
+    *,
+    font_size: int,
+    top_offset: int,
+    box_width: int | None,
+    box_padding: int,
+    text_alignment: str,
+) -> tuple[list[str], str]:
     if not hook_lines or hook_text_path is None:
         return [], video_input
 
-    font_size = 52
-    line_gap = 6
-    top_padding = 36
-    bottom_padding = 34
-    box_top = 132
+    font_size = max(28, min(96, int(font_size or 52)))
+    box_padding = max(12, min(96, int(box_padding or 36)))
+    line_gap = max(4, round(font_size * 0.12))
     longest_line = max(len(line) for line in hook_lines)
-    box_width = min(700, max(420, 168 + longest_line * 18))
-    box_height = top_padding + bottom_padding + len(hook_lines) * font_size + max(0, len(hook_lines) - 1) * line_gap
+    resolved_box_width = (
+        max(320, min(860, int(box_width)))
+        if box_width is not None
+        else max(420, min(760, round(box_padding * 4.5 + longest_line * font_size * 0.56)))
+    )
+    box_height = box_padding * 2 + len(hook_lines) * font_size + max(0, len(hook_lines) - 1) * line_gap
+    safe_top_margin = 64
+    safe_bottom_margin = 96
+    box_top = min(max(safe_top_margin, int(top_offset or 132)), max(safe_top_margin, 1920 - box_height - safe_bottom_margin))
+    box_left = f"(w-{resolved_box_width})/2"
+    text_x = "(w-text_w)/2"
+    if text_alignment == "left":
+        text_x = f"{box_left}+{box_padding}"
+    elif text_alignment == "right":
+        text_x = f"{box_left}+{resolved_box_width}-text_w-{box_padding}"
 
     filters = [
-        f"{video_input}drawbox=x=(w-{box_width})/2:y={box_top}:w={box_width}:h={box_height}:color=white@0.97:t=fill[hookbox0]"
+        f"{video_input}drawbox=x={box_left}:y={box_top}:w={resolved_box_width}:h={box_height}:color=white@0.97:t=fill[hookbox0]"
     ]
 
     filters.append(
@@ -503,7 +549,7 @@ def _hook_overlay_filter_chain(video_input: str, hook_lines: list[str], hook_tex
         "font=Sans:fontcolor=0x101010:"
         f"fontsize={font_size}:"
         f"line_spacing={line_gap}:borderw=0:shadowx=0:shadowy=1:shadowcolor=black@0.06:"
-        f"x=(w-text_w)/2:y={box_top}+({box_height}-text_h)/2[hookbox1]"
+        f"x={text_x}:y={box_top}+({box_height}-text_h)/2[hookbox1]"
     )
 
     return filters, "[hookbox1]"
@@ -514,6 +560,8 @@ def _vertical_filter_chain(
     probe: dict[str, Any],
     *,
     blur_intensity: float,
+    foreground_scale: float,
+    foreground_vertical_offset: int,
 ) -> tuple[list[str], str]:
     width = float(probe.get("width") or 0)
     height = float(probe.get("height") or 0)
@@ -534,22 +582,30 @@ def _vertical_filter_chain(
             f"{video_input}split=2[fgsrc][bgsrc]",
             "[bgsrc]scale=1080:1920:force_original_aspect_ratio=increase,"
             f"crop=1080:1920,gblur=sigma={blur_sigma},eq=brightness=-0.08[bgv]",
-            "[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease,setsar=1[fgv]",
-            "[bgv][fgv]overlay=(W-w)/2:(H-h)/2[basev]",
+            "[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"scale=trunc(iw*{foreground_scale}/2)*2:trunc(ih*{foreground_scale}/2)*2,setsar=1[fgv]",
+            f"[bgv][fgv]overlay=(W-w)/2:(H-h)/2+{foreground_vertical_offset}[basev]",
         ],
         "[basev]",
     )
 
 
-def _center_blur_fill_filter_chain(video_input: str, *, blur_intensity: float) -> tuple[list[str], str]:
+def _center_blur_fill_filter_chain(
+    video_input: str,
+    *,
+    blur_intensity: float,
+    foreground_scale: float,
+    foreground_vertical_offset: int,
+) -> tuple[list[str], str]:
     blur_sigma = _clamped_blur_sigma(blur_intensity)
     return (
         [
             f"{video_input}split=2[fgsrc][bgsrc]",
             "[bgsrc]scale=1080:1920:force_original_aspect_ratio=increase,"
             f"crop=1080:1920,gblur=sigma={blur_sigma},eq=brightness=-0.10:saturation=0.88,setsar=1[bgv]",
-            "[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease,setsar=1[fgv]",
-            "[bgv][fgv]overlay=(W-w)/2:(H-h)/2:format=auto[basev]",
+            "[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"scale=trunc(iw*{foreground_scale}/2)*2:trunc(ih*{foreground_scale}/2)*2,setsar=1[fgv]",
+            f"[bgv][fgv]overlay=(W-w)/2:(H-h)/2+{foreground_vertical_offset}:format=auto[basev]",
         ],
         "[basev]",
     )
@@ -573,7 +629,15 @@ def render_short_clip(
     quality_preset: str,
     export_mode: str,
     blur_intensity: float = 30.0,
+    foreground_scale: float = 1.0,
+    foreground_vertical_offset: int = 0,
     hook_text: str | None = None,
+    hook_font_size: int = 52,
+    hook_top_offset: int = 132,
+    hook_box_width: int | None = None,
+    hook_box_padding: int = 36,
+    hook_max_lines: int = 3,
+    hook_text_alignment: str = "center",
     command_log_path: Path | None = None,
 ) -> None:
     if end_sec <= start_sec:
@@ -588,15 +652,28 @@ def render_short_clip(
     filter_parts: list[str] = []
     audio_label = None
     hook_text_path: Path | None = None
+    foreground_scale = round(max(0.8, min(float(foreground_scale or 1.0), 1.3)), 3)
+    foreground_vertical_offset = int(max(-320, min(int(foreground_vertical_offset or 0), 320)))
 
     try:
         if has_video:
             trimmed_video = f"[0:v]trim=start={start_sec}:end={end_sec},setpts=PTS-STARTPTS,"
             if export_mode == "center_blur_fill":
-                chains, video_label = _center_blur_fill_filter_chain(trimmed_video, blur_intensity=blur_intensity)
+                chains, video_label = _center_blur_fill_filter_chain(
+                    trimmed_video,
+                    blur_intensity=blur_intensity,
+                    foreground_scale=foreground_scale,
+                    foreground_vertical_offset=foreground_vertical_offset,
+                )
                 filter_parts.extend(chains)
             elif export_mode == "vertical_9_16":
-                chains, video_label = _vertical_filter_chain(trimmed_video, probe, blur_intensity=blur_intensity)
+                chains, video_label = _vertical_filter_chain(
+                    trimmed_video,
+                    probe,
+                    blur_intensity=blur_intensity,
+                    foreground_scale=foreground_scale,
+                    foreground_vertical_offset=foreground_vertical_offset,
+                )
                 filter_parts.extend(chains)
             else:
                 filter_parts.append(f"{trimmed_video}setsar=1[basev]")
@@ -611,14 +688,31 @@ def render_short_clip(
 
         overlay_text = hook_overlay_text(hook_text)
         if overlay_text:
-            hook_lines = _wrap_hook_overlay_text(overlay_text)
+            hook_lines = _wrap_hook_overlay_text(
+                overlay_text,
+                max_lines=max(1, min(int(hook_max_lines or 3), 4)),
+                max_chars_per_line=_hook_chars_per_line(
+                    box_width=hook_box_width,
+                    font_size=max(28, min(int(hook_font_size or 52), 96)),
+                    box_padding=max(12, min(int(hook_box_padding or 36), 96)),
+                ),
+            )
             if hook_lines:
                 handle = tempfile.NamedTemporaryFile("w", suffix="-roughcut-hook.txt", delete=False, encoding="utf-8")
                 handle.write("\n".join(hook_lines))
                 handle.flush()
                 handle.close()
                 hook_text_path = Path(handle.name)
-            hook_filters, video_label = _hook_overlay_filter_chain(video_label, hook_lines, hook_text_path)
+            hook_filters, video_label = _hook_overlay_filter_chain(
+                video_label,
+                hook_lines,
+                hook_text_path,
+                font_size=hook_font_size,
+                top_offset=hook_top_offset,
+                box_width=hook_box_width,
+                box_padding=hook_box_padding,
+                text_alignment=hook_text_alignment,
+            )
             filter_parts.extend(hook_filters)
 
         final_video_label = video_label

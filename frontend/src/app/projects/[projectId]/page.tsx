@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { CloudUpload, Download, FolderOpen, History, PanelRightOpen, Sparkles } from "lucide-react";
+import { CloudUpload, Download, FolderOpen, History, PanelRightOpen, SlidersHorizontal, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { CandidateList } from "@/components/project/candidate-list";
+import { ClipStyleEditor } from "@/components/project/clip-style-editor";
 import { FileList } from "@/components/project/file-list";
 import { GeneratePanel } from "@/components/project/generate-panel";
 import { JobFeed } from "@/components/project/job-feed";
@@ -29,13 +30,16 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { NameDialog } from "@/components/ui/name-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+import { hasClipStyleOverrides } from "@/lib/clip-style";
 import { formatDuration, formatTimestamp } from "@/lib/format";
 import type {
   CandidateClip,
+  ClipStyleOverrides,
   FileItem,
   JobCreateRequest,
   JobSummary,
   PresetConfig,
+  ProjectClipStyle,
   ProjectDetail,
   SettingsResponse
 } from "@/lib/types";
@@ -43,6 +47,10 @@ import type {
 type LibraryTab = "uploads" | "outputs";
 
 const FILE_FOCUS_SENTINEL = "__file_focus__";
+
+function clipStyleKey(sourceCandidateJobId: string, candidateId: string) {
+  return `${sourceCandidateJobId}:${candidateId}`;
+}
 
 function payloadString(job: JobSummary, key: string) {
   const value = job.payload[key];
@@ -167,6 +175,23 @@ function mergeUploadedFiles(project: ProjectDetail, uploadedFiles: FileItem[]) {
   };
 }
 
+function upsertProjectClipStyle(
+  project: ProjectDetail,
+  sourceCandidateJobId: string,
+  candidateId: string,
+  record: ProjectClipStyle | null
+) {
+  const filtered = project.clip_styles.filter(
+    (item) => !(item.source_candidate_job_id === sourceCandidateJobId && item.candidate_id === candidateId)
+  );
+
+  return {
+    ...project,
+    clip_styles: record ? [record, ...filtered] : filtered,
+    updated_at: new Date().toISOString()
+  };
+}
+
 export default function ProjectDetailPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -188,6 +213,7 @@ export default function ProjectDetailPage() {
   const [renameTarget, setRenameTarget] = useState<FileItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [clipEditorOpen, setClipEditorOpen] = useState(false);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [runsDialogOpen, setRunsDialogOpen] = useState(false);
@@ -422,15 +448,75 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function handleExportCandidate(job: JobSummary, candidate: CandidateClip) {
+  async function persistClipStyle(
+    sourceCandidateJobId: string,
+    candidateId: string,
+    overrides: ClipStyleOverrides | undefined,
+    options?: { notify?: boolean }
+  ) {
+    const nextOverrides = overrides && hasClipStyleOverrides(overrides) ? overrides : undefined;
+
     try {
-      const exportJob = await api.exportCandidate(projectId, job.id, candidate.id, job.captions_enabled);
+      const record = await api.saveClipStyle(projectId, sourceCandidateJobId, candidateId, nextOverrides);
+      setProject((current) =>
+        current ? upsertProjectClipStyle(current, sourceCandidateJobId, candidateId, record) : current
+      );
+      if (options?.notify !== false) {
+        toast.success(nextOverrides ? "Clip style saved." : "Clip style reset.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save clip style.");
+      throw error;
+    }
+  }
+
+  async function persistProjectDefaultClipStyle(overrides: ClipStyleOverrides | undefined, options?: { notify?: boolean }) {
+    const nextOverrides = overrides && hasClipStyleOverrides(overrides) ? overrides : undefined;
+
+    try {
+      const response = await api.saveProjectClipStyleDefaults(projectId, nextOverrides);
+      setProject((current) =>
+        current
+          ? {
+              ...current,
+              clip_style_defaults: response?.style_overrides ?? null,
+              updated_at: new Date().toISOString()
+            }
+          : current
+      );
+      if (options?.notify !== false) {
+        toast.success(nextOverrides ? "Project default clip style saved." : "Project default clip style cleared.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save the project default style.");
+      throw error;
+    }
+  }
+
+  async function handleExportCandidate(job: JobSummary, candidate: CandidateClip, styleOverrides?: ClipStyleOverrides) {
+    const savedClipStyle = project?.clip_styles.find(
+      (item) => item.source_candidate_job_id === job.id && item.candidate_id === candidate.id
+    )?.style_overrides;
+    const candidateStyleOverrides =
+      styleOverrides === undefined
+        ? savedClipStyle || project?.clip_style_defaults || undefined
+        : styleOverrides && hasClipStyleOverrides(styleOverrides)
+        ? styleOverrides
+        : undefined;
+    try {
+      const exportJob = await api.exportCandidate(
+        projectId,
+        job.id,
+        candidate.id,
+        job.captions_enabled,
+        candidateStyleOverrides
+      );
       setSelectedJobId(exportJob.id);
       setSelectedCandidateId(candidate.id);
       setSelectedFileId(job.source_file_id);
       setPreviewStartSec(candidate.start_sec);
       await loadProject();
-      toast.success("Short export queued.");
+      toast.success(candidateStyleOverrides ? "Styled short export queued." : "Short export queued.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not export candidate.");
     }
@@ -450,6 +536,7 @@ export default function ProjectDetailPage() {
     setSelectedFileId(file.id);
     setPreviewStartSec(null);
     setInspectorOpen(false);
+    setClipEditorOpen(false);
   }
 
   function handleSelectFileFromLibrary(file: FileItem) {
@@ -486,6 +573,11 @@ export default function ProjectDetailPage() {
     setInspectorOpen(true);
   }
 
+  function handleOpenCandidateEditor(job: JobSummary, candidate: CandidateClip) {
+    handleSelectCandidate(job, candidate);
+    setClipEditorOpen(true);
+  }
+
   if (loading) {
     return (
       <div className="flex flex-col gap-4 lg:h-full lg:overflow-y-auto lg:pr-1">
@@ -512,6 +604,46 @@ export default function ProjectDetailPage() {
     candidateReviewJob && selectedCandidate ? candidateExportJobs(sortedJobs, candidateReviewJob.id, selectedCandidate.id) : [];
   const selectedCandidateActiveExport = selectedCandidateExportRuns.find((job) => job.status === "queued" || job.status === "running");
   const selectedCandidateClip = candidateClipFile(candidateReviewJob, selectedCandidate, sortedJobs, project.files);
+  const clipStyleMap = new Map(project.clip_styles.map((item) => [clipStyleKey(item.source_candidate_job_id, item.candidate_id), item.style_overrides]));
+  const editedCandidateIds = new Set(
+    candidateReviewJob
+      ? (candidateReviewJob.result?.candidates || [])
+          .filter((candidate) => clipStyleMap.has(clipStyleKey(candidateReviewJob.id, candidate.id)))
+          .map((candidate) => candidate.id)
+      : []
+  );
+  const selectedCandidateStyle =
+    candidateReviewJob && selectedCandidate ? clipStyleMap.get(clipStyleKey(candidateReviewJob.id, selectedCandidate.id)) : undefined;
+  const selectedEffectiveStyle = selectedCandidateStyle || project.clip_style_defaults || undefined;
+  const selectedCandidateEdited = selectedCandidate ? editedCandidateIds.has(selectedCandidate.id) : false;
+  const selectedUsingProjectDefault = Boolean(selectedCandidate && !selectedCandidateStyle && project.clip_style_defaults);
+  const clipStyleCopySources =
+    candidateReviewJob
+      ? [
+          ...(project.clip_style_defaults
+            ? [
+                {
+                  id: "__project_default__",
+                  label: "Project default",
+                  styleOverrides: project.clip_style_defaults
+                }
+              ]
+            : []),
+          ...(candidateReviewJob.result?.candidates || [])
+            .filter((candidate) => !selectedCandidate || candidate.id !== selectedCandidate.id)
+            .map((candidate) => {
+              const styleOverrides = clipStyleMap.get(clipStyleKey(candidateReviewJob.id, candidate.id));
+              return styleOverrides
+                ? {
+                    id: clipStyleKey(candidateReviewJob.id, candidate.id),
+                    label: candidateTitle(candidate),
+                    styleOverrides
+                  }
+                : null;
+            })
+            .filter((item): item is { id: string; label: string; styleOverrides: ClipStyleOverrides } => Boolean(item))
+        ]
+      : [];
   const currentSourceFile = (selectedFile?.kind === "upload" ? selectedFile : null) || candidateSourceFile || uploads[0] || null;
   const currentPresetId = candidateReviewJob?.preset_id ?? selectedJob?.preset_id ?? settings.default_preset;
   const currentPreset =
@@ -565,6 +697,15 @@ export default function ProjectDetailPage() {
                 <span className="rounded-full border border-border/70 bg-background/75 px-3 py-1.5 text-muted-foreground">
                   Selected: <span className="font-medium text-foreground">{selectedCandidate ? candidateTitle(selectedCandidate) : "Scan the gallery"}</span>
                 </span>
+                {selectedCandidateEdited ? (
+                  <span className="rounded-full border border-border/70 bg-background/75 px-3 py-1.5 text-muted-foreground">
+                    Style: <span className="font-medium text-foreground">Edited</span>
+                  </span>
+                ) : selectedUsingProjectDefault ? (
+                  <span className="rounded-full border border-border/70 bg-background/75 px-3 py-1.5 text-muted-foreground">
+                    Style: <span className="font-medium text-foreground">Project default</span>
+                  </span>
+                ) : null}
               </div>
               <p className="mt-3 text-sm leading-6 text-muted-foreground">
                 {uploadPhase === "processing"
@@ -586,6 +727,18 @@ export default function ProjectDetailPage() {
               >
                 <Sparkles className="mr-2 size-4" />
                 {jobBusy ? "Generating..." : "Generate Shorts Candidates"}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!selectedCandidate || !candidateReviewJob}
+                onClick={() => {
+                  if (selectedCandidate && candidateReviewJob) {
+                    handleOpenCandidateEditor(candidateReviewJob, selectedCandidate);
+                  }
+                }}
+              >
+                <SlidersHorizontal className="mr-2 size-4" />
+                Edit Clip
               </Button>
               <Button
                 disabled={!selectedCandidate || !candidateReviewJob || Boolean(selectedCandidateActiveExport) || uploadBusy}
@@ -641,6 +794,8 @@ export default function ProjectDetailPage() {
               <p className="panel-label">Preview Stage</p>
               {selectedCandidate ? <Badge>{Math.round(selectedCandidate.score_total)} score</Badge> : null}
               {selectedCandidateClip ? <Badge variant="success">Rendered</Badge> : null}
+              {selectedCandidateEdited ? <Badge variant="muted">Edited</Badge> : null}
+              {!selectedCandidateEdited && selectedUsingProjectDefault ? <Badge variant="muted">Project default</Badge> : null}
               {selectedCandidateActiveExport ? <Badge variant="warning">Exporting</Badge> : null}
               {selectedCandidate ? (
                 <Badge variant="muted">
@@ -653,7 +808,13 @@ export default function ProjectDetailPage() {
             <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">{previewDescription}</p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
+            {selectedCandidate && candidateReviewJob ? (
+              <Button variant="secondary" onClick={() => handleOpenCandidateEditor(candidateReviewJob, selectedCandidate)}>
+                <SlidersHorizontal className="mr-2 size-4" />
+                Edit clip
+              </Button>
+            ) : null}
             {selectedCandidate && candidateReviewJob ? (
               <Button variant="secondary" onClick={() => handleOpenCandidateDetails(candidateReviewJob, selectedCandidate)}>
                 <PanelRightOpen className="mr-2 size-4" />
@@ -684,6 +845,34 @@ export default function ProjectDetailPage() {
         onPreviewCandidate={handlePreviewCandidate}
         onExportCandidate={handleExportCandidate}
         onOpenDetails={handleOpenCandidateDetails}
+        onEditCandidate={handleOpenCandidateEditor}
+        editedCandidateIds={editedCandidateIds}
+      />
+
+      <ClipStyleEditor
+        open={clipEditorOpen}
+        onOpenChange={setClipEditorOpen}
+        sourceJobId={candidateReviewJob?.id || null}
+        candidate={selectedCandidate}
+        sourceFile={candidateSourceFile || currentSourceFile}
+        preset={currentPreset}
+        activeOverrides={selectedEffectiveStyle}
+        hasClipSpecificStyle={selectedCandidateEdited}
+        copySources={clipStyleCopySources}
+        busy={Boolean(selectedCandidateActiveExport) || uploadBusy}
+        onSaveClipStyle={async (overrides, options) => {
+          if (selectedCandidate && candidateReviewJob) {
+            await persistClipStyle(candidateReviewJob.id, selectedCandidate.id, overrides, options);
+          }
+        }}
+        onSaveProjectDefault={async (overrides, options) => {
+          await persistProjectDefaultClipStyle(overrides, options);
+        }}
+        onRender={async (overrides) => {
+          if (selectedCandidate && candidateReviewJob) {
+            await handleExportCandidate(candidateReviewJob, selectedCandidate, overrides);
+          }
+        }}
       />
 
       <Dialog open={libraryDialogOpen} onOpenChange={setLibraryDialogOpen}>

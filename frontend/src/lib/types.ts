@@ -84,9 +84,58 @@ export interface ProjectSummary {
   status_summary: ProjectStatusSummary;
 }
 
+export type ClipStylePresetId = "clean" | "bold" | "aggressive";
+
+export type ClipHookTextAlignment = "left" | "center" | "right";
+
+export interface ClipHookStyleOverrides {
+  hook_text?: string;
+  font_size?: number;
+  top_offset?: number;
+  box_width?: number;
+  box_padding?: number;
+  max_lines?: number;
+  text_alignment?: ClipHookTextAlignment;
+}
+
+export interface ClipCaptionStyleOverrides {
+  base_color?: string;
+  active_word_color?: string;
+  font_size?: number;
+  vertical_position?: "lower" | "lower_middle";
+  bottom_offset?: number;
+  max_lines?: number;
+  outline_strength?: number;
+  shadow_strength?: number;
+}
+
+export interface ClipCompositionStyleOverrides {
+  blur_intensity?: number;
+  foreground_scale?: number;
+  foreground_vertical_offset?: number;
+}
+
+export interface ClipStyleOverrides {
+  style_preset?: ClipStylePresetId;
+  hook?: ClipHookStyleOverrides;
+  captions?: ClipCaptionStyleOverrides;
+  composition?: ClipCompositionStyleOverrides;
+}
+
+export interface ProjectClipStyle {
+  project_id: string;
+  source_candidate_job_id: string;
+  candidate_id: string;
+  style_overrides: ClipStyleOverrides;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProjectDetail extends ProjectSummary {
   files: FileItem[];
   jobs: JobSummary[];
+  clip_style_defaults: ClipStyleOverrides | null;
+  clip_styles: ProjectClipStyle[];
 }
 
 export interface UploadResponse {
@@ -143,6 +192,34 @@ export interface PresetConfig {
   caption_max_lines: number;
   caption_max_words_per_line: number;
   blur_intensity: number;
+}
+
+export interface ClipStyleDraft {
+  stylePreset: ClipStylePresetId;
+  hook: {
+    hookText: string;
+    fontSize: number;
+    topOffset: number;
+    boxWidth: number;
+    boxPadding: number;
+    maxLines: number;
+    textAlignment: ClipHookTextAlignment;
+  };
+  captions: {
+    baseColor: string;
+    activeWordColor: string;
+    fontSize: number;
+    verticalPosition: "lower" | "lower_middle";
+    bottomOffset: number;
+    maxLines: number;
+    outlineStrength: number;
+    shadowStrength: number;
+  };
+  composition: {
+    blurIntensity: number;
+    foregroundScale: number;
+    foregroundVerticalOffset: number;
+  };
 }
 
 export interface PresetsResponse {

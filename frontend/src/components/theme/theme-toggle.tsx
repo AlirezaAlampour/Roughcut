@@ -21,7 +21,7 @@ function applyTheme(theme: ResolvedTheme) {
   root.style.colorScheme = theme;
 }
 
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({ className, compact = false }: { className?: string; compact?: boolean }) {
   const [mounted, setMounted] = useState(false);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>("light");
   const [themeSource, setThemeSource] = useState<ThemeSource>("system");
@@ -62,32 +62,44 @@ export function ThemeToggle({ className }: { className?: string }) {
   return (
     <Button
       type="button"
-      variant="secondary"
-      className={cn("h-auto w-full justify-start rounded-[24px] px-4 py-3", className)}
+      variant={compact ? "ghost" : "secondary"}
+      className={cn(compact ? "size-11 rounded-2xl border border-border/70 bg-background/65 p-0" : "h-auto w-full justify-start rounded-[24px] px-4 py-3", className)}
       onClick={toggleTheme}
+      aria-label={
+        mounted ? `Switch to ${resolvedTheme === "dark" ? "light" : "dark"} mode` : "Toggle theme"
+      }
+      title={mounted ? (resolvedTheme === "dark" ? "Dark mode" : "Light mode") : "Theme"}
     >
-      <div className="flex w-full items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3 text-left">
-          <div className="flex size-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            {mounted ? (
-              resolvedTheme === "dark" ? <MoonStar className="size-4" /> : <SunMedium className="size-4" />
-            ) : (
-              <MonitorCog className="size-4" />
-            )}
+      {compact ? (
+        mounted ? (
+          resolvedTheme === "dark" ? <MoonStar className="size-4" /> : <SunMedium className="size-4" />
+        ) : (
+          <MonitorCog className="size-4" />
+        )
+      ) : (
+        <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3 text-left">
+            <div className="flex size-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              {mounted ? (
+                resolvedTheme === "dark" ? <MoonStar className="size-4" /> : <SunMedium className="size-4" />
+              ) : (
+                <MonitorCog className="size-4" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">
+                {mounted ? (resolvedTheme === "dark" ? "Dark mode" : "Light mode") : "Theme"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {mounted && themeSource !== "system"
+                  ? "Stored locally on this browser."
+                  : "Following system until you switch it."}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              {mounted ? (resolvedTheme === "dark" ? "Dark mode" : "Light mode") : "Theme"}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {mounted && themeSource !== "system"
-                ? "Stored locally on this browser."
-                : "Following system until you switch it."}
-            </p>
-          </div>
+          <span className="panel-label">{mounted ? (resolvedTheme === "dark" ? "Moon" : "Sun") : "Auto"}</span>
         </div>
-        <span className="panel-label">{mounted ? (resolvedTheme === "dark" ? "Moon" : "Sun") : "Auto"}</span>
-      </div>
+      )}
     </Button>
   );
 }

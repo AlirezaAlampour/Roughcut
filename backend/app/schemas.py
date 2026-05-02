@@ -102,6 +102,8 @@ class ProjectSummary(BaseModel):
 class ProjectDetail(ProjectSummary):
     files: list[FileItem] = Field(default_factory=list)
     jobs: list[JobSummary] = Field(default_factory=list)
+    clip_style_defaults: "ClipStyleOverrides | None" = None
+    clip_styles: list["ProjectClipStyle"] = Field(default_factory=list)
 
 
 class ProjectCreateRequest(BaseModel):
@@ -348,10 +350,97 @@ class CandidateManifest(BaseModel):
     notes_for_user: list[str] = Field(default_factory=list)
 
 
+ClipStylePreset = Literal["clean", "bold", "aggressive"]
+
+
+class ClipHookStyleOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hook_text: str | None = Field(default=None, max_length=240)
+    font_size: int | None = Field(default=None, ge=28, le=96)
+    top_offset: int | None = Field(default=None, ge=32, le=520)
+    box_width: int | None = Field(default=None, ge=320, le=860)
+    box_padding: int | None = Field(default=None, ge=12, le=96)
+    max_lines: int | None = Field(default=None, ge=1, le=4)
+    text_alignment: Literal["left", "center", "right"] | None = None
+
+    @field_validator("hook_text")
+    @classmethod
+    def normalize_hook_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class ClipCaptionStyleOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_color: str | None = None
+    active_word_color: str | None = None
+    font_size: int | None = Field(default=None, ge=36, le=120)
+    vertical_position: Literal["lower", "lower_middle"] | None = None
+    bottom_offset: int | None = Field(default=None, ge=120, le=760)
+    max_lines: int | None = Field(default=None, ge=1, le=3)
+    outline_strength: float | None = Field(default=None, ge=0, le=12)
+    shadow_strength: float | None = Field(default=None, ge=0, le=8)
+
+    @field_validator("base_color", "active_word_color")
+    @classmethod
+    def validate_color(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if not stripped.startswith("#") or len(stripped) != 7:
+            raise ValueError("Colors must use #RRGGBB format.")
+        return stripped
+
+
+class ClipCompositionStyleOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    blur_intensity: float | None = Field(default=None, ge=0, le=80)
+    foreground_scale: float | None = Field(default=None, ge=0.8, le=1.3)
+    foreground_vertical_offset: int | None = Field(default=None, ge=-320, le=320)
+
+
+class ClipStyleOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    style_preset: ClipStylePreset | None = None
+    hook: ClipHookStyleOverrides | None = None
+    captions: ClipCaptionStyleOverrides | None = None
+    composition: ClipCompositionStyleOverrides | None = None
+
+
+class ProjectClipStyle(BaseModel):
+    project_id: str
+    source_candidate_job_id: str
+    candidate_id: str
+    style_overrides: ClipStyleOverrides
+    created_at: str
+    updated_at: str
+
+
+class ProjectClipStyleDefaults(BaseModel):
+    project_id: str
+    style_overrides: ClipStyleOverrides | None = None
+    updated_at: str | None = None
+
+
+class ClipStyleSaveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    style_overrides: ClipStyleOverrides | None = None
+
+
 class CandidateExportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     captions_enabled: bool | None = None
+    style_overrides: ClipStyleOverrides | None = None
 
 
 class TraceEvent(BaseModel):

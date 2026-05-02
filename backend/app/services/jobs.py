@@ -11,6 +11,7 @@ from app.db import connection
 from app.schemas import (
     CandidateClip,
     CandidateManifest,
+    ClipStyleOverrides,
     EditRange,
     JobResult,
     PresetConfig,
@@ -731,6 +732,7 @@ def _write_candidate_subtitles(
     candidate: CandidateClip,
     outputs_dir: Path,
     preset: PresetConfig,
+    style_overrides: ClipStyleOverrides | None,
     log_lines: list[str],
 ) -> tuple[Path | None, Path | None, Path | None]:
     if not candidate.subtitle_segments:
@@ -745,11 +747,31 @@ def _write_candidate_subtitles(
     media.write_ass_karaoke(
         ass_path,
         candidate.subtitle_segments,
-        base_color=preset.caption_base_color,
-        active_word_color=preset.caption_active_word_color,
-        vertical_position=preset.caption_vertical_position,
-        max_lines=preset.caption_max_lines,
+        base_color=style_overrides.captions.base_color
+        if style_overrides and style_overrides.captions and style_overrides.captions.base_color
+        else preset.caption_base_color,
+        active_word_color=style_overrides.captions.active_word_color
+        if style_overrides and style_overrides.captions and style_overrides.captions.active_word_color
+        else preset.caption_active_word_color,
+        font_size=style_overrides.captions.font_size
+        if style_overrides and style_overrides.captions and style_overrides.captions.font_size is not None
+        else 78,
+        vertical_position=style_overrides.captions.vertical_position
+        if style_overrides and style_overrides.captions and style_overrides.captions.vertical_position
+        else preset.caption_vertical_position,
+        bottom_offset=style_overrides.captions.bottom_offset
+        if style_overrides and style_overrides.captions
+        else None,
+        max_lines=style_overrides.captions.max_lines
+        if style_overrides and style_overrides.captions and style_overrides.captions.max_lines is not None
+        else preset.caption_max_lines,
         max_words_per_line=preset.caption_max_words_per_line,
+        outline_strength=style_overrides.captions.outline_strength
+        if style_overrides and style_overrides.captions and style_overrides.captions.outline_strength is not None
+        else 5,
+        shadow_strength=style_overrides.captions.shadow_strength
+        if style_overrides and style_overrides.captions and style_overrides.captions.shadow_strength is not None
+        else 2,
     )
     _log_line(log_lines, f"Wrote {len(candidate.subtitle_segments)} subtitle segments to SRT, VTT, and ASS.")
     return srt_path, vtt_path, ass_path
@@ -769,6 +791,8 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
         payload = job["payload"]
         candidate = CandidateClip.model_validate(payload.get("candidate"))
         source_candidate_job_id = str(payload.get("source_candidate_job_id") or "")
+        style_overrides = ClipStyleOverrides.model_validate(payload.get("style_overrides") or {})
+        style_override_payload = style_overrides.model_dump(exclude_none=True)
 
         storage.ensure_project_structure(settings, project_id)
         outputs_dir = storage.outputs_root(settings, project_id) / job_id / candidate.id
@@ -840,7 +864,17 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
             )
 
         export_mode = payload.get("export_mode") or preset.export_mode
-        blur_intensity = float(payload.get("blur_intensity", preset.blur_intensity))
+        blur_intensity = float(
+            style_overrides.composition.blur_intensity
+            if style_overrides.composition and style_overrides.composition.blur_intensity is not None
+            else payload.get("blur_intensity", preset.blur_intensity)
+        )
+        hook_text = media.hook_overlay_text(
+            style_overrides.hook.hook_text
+            if style_overrides.hook and style_overrides.hook.hook_text is not None
+            else candidate.hook_text,
+            candidate.title,
+        )
         _log_and_trace(
             log_lines,
             trace,
@@ -854,6 +888,7 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
                 "caption_segment_count": len(candidate.subtitle_segments),
                 "export_mode": export_mode,
                 "blur_intensity": blur_intensity,
+                "style_overrides": style_override_payload or None,
             },
         )
 
@@ -866,6 +901,7 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
                 "source_file": source_file["name"],
                 "export_mode": export_mode,
                 "blur_intensity": blur_intensity,
+                "style_overrides": style_override_payload or None,
             },
         )
         trace.emit(
@@ -878,6 +914,7 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
             candidate=candidate,
             outputs_dir=outputs_dir,
             preset=preset,
+            style_overrides=style_overrides,
             log_lines=log_lines,
         )
         if srt_path is not None:
@@ -948,7 +985,31 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
             quality_preset=payload.get("output_quality_preset", "balanced"),
             export_mode=export_mode,
             blur_intensity=blur_intensity,
-            hook_text=media.hook_overlay_text(candidate.hook_text, candidate.title),
+            foreground_scale=style_overrides.composition.foreground_scale
+            if style_overrides.composition and style_overrides.composition.foreground_scale is not None
+            else 1.0,
+            foreground_vertical_offset=style_overrides.composition.foreground_vertical_offset
+            if style_overrides.composition and style_overrides.composition.foreground_vertical_offset is not None
+            else 0,
+            hook_text=hook_text,
+            hook_font_size=style_overrides.hook.font_size
+            if style_overrides.hook and style_overrides.hook.font_size is not None
+            else 52,
+            hook_top_offset=style_overrides.hook.top_offset
+            if style_overrides.hook and style_overrides.hook.top_offset is not None
+            else 132,
+            hook_box_width=style_overrides.hook.box_width
+            if style_overrides.hook and style_overrides.hook.box_width is not None
+            else None,
+            hook_box_padding=style_overrides.hook.box_padding
+            if style_overrides.hook and style_overrides.hook.box_padding is not None
+            else 36,
+            hook_max_lines=style_overrides.hook.max_lines
+            if style_overrides.hook and style_overrides.hook.max_lines is not None
+            else 3,
+            hook_text_alignment=style_overrides.hook.text_alignment
+            if style_overrides.hook and style_overrides.hook.text_alignment is not None
+            else "center",
             command_log_path=render_command_path,
         )
         _log_and_trace(

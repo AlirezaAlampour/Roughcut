@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Clapperboard, Play, Search, Volume2 } from "lucide-react";
+import { Clapperboard, Play, Search, SlidersHorizontal, Volume2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ interface CandidateListProps {
   onPreviewCandidate?: (job: JobSummary, candidate: CandidateClip) => void;
   onExportCandidate?: (job: JobSummary, candidate: CandidateClip) => Promise<void> | void;
   onOpenDetails?: (job: JobSummary, candidate: CandidateClip) => void;
+  onEditCandidate?: (job: JobSummary, candidate: CandidateClip) => void;
+  editedCandidateIds?: Set<string>;
   className?: string;
 }
 
@@ -170,6 +172,8 @@ export function CandidateList({
   onPreviewCandidate,
   onExportCandidate,
   onOpenDetails,
+  onEditCandidate,
+  editedCandidateIds,
   className
 }: CandidateListProps) {
   const [query, setQuery] = useState("");
@@ -301,6 +305,7 @@ export function CandidateList({
                 const activeExportJob = exportJobs.find((job) => job.status === "queued" || job.status === "running");
                 const rendered = exportJobs.some((job) => job.status === "completed" && Boolean(job.result?.output_file_ids?.length));
                 const selected = selectedCandidateId === candidate.id;
+                const edited = editedCandidateIds?.has(candidate.id) ?? false;
                 const showPreview = hasVideoPreview && previewUrl && (selected || hoveredCandidateId === candidate.id);
                 const duration = candidate.end_sec - candidate.start_sec;
 
@@ -349,6 +354,7 @@ export function CandidateList({
                           <span>{formatDuration(duration)}</span>
                           <span>{formatTimestamp(candidate.start_sec, 1)}</span>
                           {rendered ? <span className="rounded-full border border-emerald-400/30 bg-emerald-400/14 px-2 py-0.5 text-emerald-100">Ready</span> : null}
+                          {edited ? <span className="rounded-full border border-white/20 bg-white/14 px-2 py-0.5 text-white">Edited</span> : null}
                           {activeExportJob ? (
                             <span className="rounded-full border border-amber-300/25 bg-amber-300/12 px-2 py-0.5 text-amber-50">Exporting</span>
                           ) : null}
@@ -389,11 +395,15 @@ export function CandidateList({
                           onClick={(event) => {
                             event.stopPropagation();
                             onSelectCandidate(sourceJob, candidate);
+                            if (onEditCandidate) {
+                              onEditCandidate(sourceJob, candidate);
+                              return;
+                            }
                             onOpenDetails?.(sourceJob, candidate);
                           }}
                         >
-                          <ArrowUpRight className="mr-2 size-4" />
-                          Details
+                          <SlidersHorizontal className="mr-2 size-4" />
+                          Edit Clip
                         </Button>
                         <Button
                           size="sm"
