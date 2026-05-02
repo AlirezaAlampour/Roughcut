@@ -52,7 +52,7 @@ export function FileList({
           {actions ? <div className="shrink-0">{actions}</div> : null}
         </div>
       </CardHeader>
-      <CardContent className={cn("flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain", contentClassName)}>
+      <CardContent className={cn("flex min-h-0 flex-1 flex-col gap-3", contentClassName)}>
         {lead ? <div className="shrink-0">{lead}</div> : null}
         {files.length === 0 ? (
           <div className="panel-inset min-h-[140px] rounded-[22px] px-4 py-6 text-sm leading-6 text-muted-foreground">

@@ -451,7 +451,7 @@ def _wrap_hook_overlay_text(
     value: str,
     *,
     max_lines: int = 3,
-    max_chars_per_line: int = 24,
+    max_chars_per_line: int = 20,
 ) -> list[str]:
     normalized = re.sub(r"\s+", " ", value).strip()
     if not normalized:
@@ -479,37 +479,34 @@ def _escape_filter_value(value: str) -> str:
     )
 
 
-def _hook_overlay_filter_chain(video_input: str, hook_lines: list[str], hook_line_paths: list[Path]) -> tuple[list[str], str]:
-    if not hook_lines or len(hook_lines) != len(hook_line_paths):
+def _hook_overlay_filter_chain(video_input: str, hook_lines: list[str], hook_text_path: Path | None) -> tuple[list[str], str]:
+    if not hook_lines or hook_text_path is None:
         return [], video_input
 
-    font_size = 54
-    line_gap = 12
-    top_padding = 34
-    bottom_padding = 34
+    font_size = 58
+    line_gap = 8
+    top_padding = 28
+    bottom_padding = 28
     box_top = 96
     longest_line = max(len(line) for line in hook_lines)
-    box_width = min(880, max(460, 140 + longest_line * 24))
+    box_width = min(760, max(440, 180 + longest_line * 20))
     box_height = top_padding + bottom_padding + len(hook_lines) * font_size + max(0, len(hook_lines) - 1) * line_gap
 
     filters = [
         f"{video_input}drawbox=x=(w-{box_width})/2:y={box_top}:w={box_width}:h={box_height}:color=white@0.97:t=fill[hookbox0]"
     ]
 
-    current_label = "[hookbox0]"
-    for index, line_path in enumerate(hook_line_paths):
-        next_label = f"[hookbox{index + 1}]"
-        y_position = box_top + top_padding + index * (font_size + line_gap)
-        filters.append(
-            f"{current_label}drawtext=textfile={_escape_filter_value(line_path.as_posix())}:"
-            "reload=0:fix_bounds=1:fontcolor=black:"
-            f"fontsize={font_size}:"
-            "borderw=0:shadowx=0:shadowy=0:"
-            f"x=(w-text_w)/2:y={y_position}{next_label}"
-        )
-        current_label = next_label
+    filters.append(
+        "[hookbox0]drawtext="
+        f"textfile={_escape_filter_value(hook_text_path.as_posix())}:"
+        "reload=0:fix_bounds=1:text_shaping=1:"
+        "font=Sans:fontcolor=0x101010:"
+        f"fontsize={font_size}:"
+        "line_spacing=-10:borderw=0:shadowx=0:shadowy=1:shadowcolor=black@0.08:"
+        f"x=(w-text_w)/2:y={box_top}+({box_height}-text_h)/2[hookbox1]"
+    )
 
-    return filters, current_label
+    return filters, "[hookbox1]"
 
 
 def _vertical_filter_chain(
@@ -590,7 +587,7 @@ def render_short_clip(
     duration = end_sec - start_sec
     filter_parts: list[str] = []
     audio_label = None
-    hook_line_paths: list[Path] = []
+    hook_text_path: Path | None = None
 
     try:
         if has_video:
@@ -615,13 +612,13 @@ def render_short_clip(
         overlay_text = hook_overlay_text(hook_text)
         if overlay_text:
             hook_lines = _wrap_hook_overlay_text(overlay_text)
-            for line in hook_lines:
+            if hook_lines:
                 handle = tempfile.NamedTemporaryFile("w", suffix="-roughcut-hook.txt", delete=False, encoding="utf-8")
-                handle.write(line)
+                handle.write("\n".join(hook_lines))
                 handle.flush()
                 handle.close()
-                hook_line_paths.append(Path(handle.name))
-            hook_filters, video_label = _hook_overlay_filter_chain(video_label, hook_lines, hook_line_paths)
+                hook_text_path = Path(handle.name)
+            hook_filters, video_label = _hook_overlay_filter_chain(video_label, hook_lines, hook_text_path)
             filter_parts.extend(hook_filters)
 
         final_video_label = video_label
@@ -661,11 +658,11 @@ def render_short_clip(
         _write_command_artifact(command_log_path, args)
         _run(args)
     finally:
-        for hook_line_path in hook_line_paths:
+        if hook_text_path is not None:
             try:
-                hook_line_path.unlink(missing_ok=True)
+                hook_text_path.unlink(missing_ok=True)
             except OSError:
-                continue
+                pass
 
 
 def extract_thumbnail(settings: Settings, video_path: Path, output_path: Path, *, offset_seconds: float = 1.0) -> None:

@@ -44,13 +44,13 @@ export function JobFeed({ jobs, selectedJobId, onSelectJob, onCancel, className 
           <Badge variant="muted">{jobs.length}</Badge>
         </div>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-4">
+      <CardContent className="flex min-h-0 flex-1 flex-col px-4 pb-4 pt-4">
         {jobs.length === 0 ? (
           <div className="panel-inset flex min-h-[220px] flex-1 items-center justify-center rounded-[24px] px-5 text-center text-sm leading-6 text-muted-foreground">
             Generate shorts candidates to see runs, export progress, and debug activity here.
           </div>
         ) : (
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
+          <div className="space-y-2">
             {jobs.map((job) => {
               const selected = job.id === selectedJobId;
 

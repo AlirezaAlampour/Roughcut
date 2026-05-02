@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { CloudUpload, Plus } from "lucide-react";
+import { CloudUpload, Loader2, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,15 +11,25 @@ import { cn } from "@/lib/utils";
 interface UploadDropzoneProps {
   disabled?: boolean;
   uploadProgress: number | null;
+  uploadPhase?: "uploading" | "processing" | null;
   onFilesSelected: (files: File[]) => void;
   compact?: boolean;
 }
 
-export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelected, compact = false }: UploadDropzoneProps) {
+export function UploadDropzone({
+  disabled = false,
+  uploadProgress,
+  uploadPhase = null,
+  onFilesSelected,
+  compact = false
+}: UploadDropzoneProps) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const helperText = useMemo(() => {
+    if (uploadPhase === "processing") {
+      return "Saving upload and refreshing the project library.";
+    }
     if (uploadProgress !== null) {
       return `Uploading ${uploadProgress}%`;
     }
@@ -27,7 +37,7 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
       return "Drop a source here or pick files from your computer.";
     }
     return "Drop one long-form video or audio source here, or choose a file from your computer.";
-  }, [compact, uploadProgress]);
+  }, [compact, uploadPhase, uploadProgress]);
 
   function emitFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0 || disabled) {
@@ -44,6 +54,9 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
         disabled && "opacity-70"
       )}
       onDragOver={(event) => {
+        if (disabled) {
+          return;
+        }
         event.preventDefault();
         setDragging(true);
       }}
@@ -66,7 +79,14 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
             {helperText}
           </p>
         </div>
-        {uploadProgress !== null ? <Progress value={uploadProgress} className={cn("w-full", compact ? "" : "max-w-sm")} /> : null}
+        {uploadPhase === "processing" ? (
+          <div className={cn("flex items-center gap-2 text-sm text-muted-foreground", compact ? "" : "max-w-sm")}>
+            <Loader2 className="size-4 animate-spin" />
+            <span>Finalizing upload</span>
+          </div>
+        ) : uploadProgress !== null ? (
+          <Progress value={uploadProgress} className={cn("w-full", compact ? "" : "max-w-sm")} />
+        ) : null}
         <Button
           type="button"
           variant="secondary"
@@ -83,7 +103,10 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
           multiple
           accept="video/*,audio/*"
           type="file"
-          onChange={(event) => emitFiles(event.target.files)}
+          onChange={(event) => {
+            emitFiles(event.target.files);
+            event.currentTarget.value = "";
+          }}
         />
       </CardContent>
     </Card>

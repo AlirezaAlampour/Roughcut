@@ -30,28 +30,28 @@
   }
 
   .dark {
-    --background: 28 17% 10%;
+    --background: 28 19% 8%;
     --foreground: 40 20% 90%;
-    --card: 28 15% 14%;
+    --card: 28 15% 12%;
     --card-foreground: 40 20% 90%;
-    --muted: 28 14% 18%;
+    --muted: 28 13% 16%;
     --muted-foreground: 34 14% 68%;
-    --accent: 104 14% 24%;
+    --accent: 40 15% 21%;
     --accent-foreground: 40 20% 92%;
-    --border: 28 12% 25%;
-    --input: 28 12% 25%;
+    --border: 28 12% 22%;
+    --input: 28 12% 22%;
     --ring: 34 23% 76%;
     --primary: 38 24% 82%;
     --primary-foreground: 28 18% 12%;
-    --secondary: 28 14% 18%;
+    --secondary: 28 14% 16%;
     --secondary-foreground: 40 20% 90%;
     --destructive: 358 62% 63%;
     --destructive-foreground: 0 0% 98%;
-    --shell: 28 16% 12%;
-    --surface: 28 16% 14%;
-    --surface-soft: 28 13% 19%;
+    --shell: 28 17% 10%;
+    --surface: 28 16% 12%;
+    --surface-soft: 28 12% 17%;
     --surface-strong: 40 18% 88%;
-    --code-background: 28 16% 9%;
+    --code-background: 28 16% 8%;
     --code-foreground: 42 24% 88%;
   }
 
@@ -69,9 +69,10 @@
   body {
     @apply bg-background font-sans text-foreground antialiased transition-colors duration-300;
     background-image:
-      radial-gradient(circle at top left, color-mix(in srgb, hsl(var(--accent)) 48%, transparent), transparent 26%),
-      radial-gradient(circle at top right, color-mix(in srgb, hsl(var(--secondary)) 85%, transparent), transparent 22%),
-      linear-gradient(180deg, color-mix(in srgb, hsl(var(--surface)) 56%, transparent), transparent);
+      radial-gradient(circle at top left, color-mix(in srgb, hsl(var(--accent)) 52%, transparent), transparent 28%),
+      radial-gradient(circle at 82% 0%, color-mix(in srgb, hsl(var(--primary)) 10%, transparent), transparent 24%),
+      radial-gradient(circle at bottom center, color-mix(in srgb, hsl(var(--secondary)) 72%, transparent), transparent 34%),
+      linear-gradient(180deg, color-mix(in srgb, hsl(var(--surface)) 84%, transparent), transparent);
     min-height: 100vh;
     height: 100%;
     overflow-x: hidden;
@@ -116,11 +117,15 @@
   }
 
   .app-frame {
-    background-image: linear-gradient(180deg, hsl(var(--shell) / 0.98), hsl(var(--surface) / 0.96));
+    background-image:
+      radial-gradient(circle at top, hsl(var(--primary) / 0.06), transparent 34%),
+      linear-gradient(180deg, hsl(var(--shell) / 0.985), hsl(var(--surface) / 0.965));
   }
 
   .panel-gradient {
-    background-image: linear-gradient(135deg, hsl(var(--card) / 0.98), hsl(var(--muted) / 0.9));
+    background-image:
+      linear-gradient(145deg, hsl(var(--card) / 0.98), hsl(var(--muted) / 0.88)),
+      radial-gradient(circle at top right, hsl(var(--primary) / 0.04), transparent 28%);
   }
 
   .panel-inset {

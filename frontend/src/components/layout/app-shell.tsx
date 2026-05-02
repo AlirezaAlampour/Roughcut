@@ -18,15 +18,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground lg:h-screen lg:overflow-hidden">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1760px] flex-col gap-4 px-4 pb-4 pt-4 lg:h-full lg:min-h-0 lg:flex-row lg:gap-5 lg:px-5 lg:py-5">
-        <aside className="app-frame flex shrink-0 flex-col rounded-[32px] border border-border/60 p-4 shadow-soft backdrop-blur lg:h-full lg:w-[280px] lg:overflow-hidden lg:p-6">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1760px] flex-col gap-4 px-4 pb-4 pt-4 lg:h-full lg:min-h-0 lg:flex-row lg:gap-4 lg:px-5 lg:py-5">
+        <aside className="app-frame flex shrink-0 flex-col rounded-[30px] border border-border/60 px-4 py-5 shadow-soft backdrop-blur lg:h-full lg:w-[236px] lg:overflow-hidden lg:px-5 lg:py-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lift">
+            <div className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lift">
               <Clapperboard className="size-5" />
             </div>
             <div>
-              <p className="font-serif text-2xl tracking-tight">Roughcut</p>
-              <p className="text-sm text-muted-foreground">Local-first shorts factory</p>
+              <p className="font-serif text-[1.75rem] tracking-tight">Roughcut</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Local shorts review</p>
             </div>
           </div>
 
@@ -39,10 +39,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "flex min-w-fit items-center gap-3 rounded-2xl px-4 py-3 text-sm transition",
+                    "flex min-w-fit items-center gap-3 rounded-[20px] px-4 py-3 text-sm transition",
                     active
                       ? "bg-primary text-primary-foreground shadow-lift"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                   )}
                 >
                   <Icon className="size-4" />
@@ -57,7 +57,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="panel-gradient rounded-[24px] border border-border/70 p-4">
               <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">Local Run</p>
               <p className="mt-2 text-sm leading-6 text-foreground">
-                Upload long-form media, generate ranked shorts candidates, and keep the whole pipeline on your own network.
+                Browse ranked shorts, export selectively, and keep media execution deterministic on your own network.
               </p>
             </div>
           </div>
