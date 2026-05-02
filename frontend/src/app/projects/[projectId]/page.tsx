@@ -6,9 +6,11 @@ import { Download } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/page-header";
+import { CandidateList } from "@/components/project/candidate-list";
 import { FileList } from "@/components/project/file-list";
 import { GeneratePanel } from "@/components/project/generate-panel";
 import { JobFeed } from "@/components/project/job-feed";
+import { JobInspector } from "@/components/project/job-inspector";
 import { MediaPreview } from "@/components/project/media-preview";
 import { UploadDropzone } from "@/components/project/upload-dropzone";
 import {
@@ -37,6 +39,75 @@ import type {
   SettingsResponse
 } from "@/lib/types";
 
+type LibraryTab = "uploads" | "outputs";
+
+function payloadString(job: JobSummary, key: string) {
+  const value = job.payload[key];
+  return typeof value === "string" ? value : null;
+}
+
+function candidateFromPayload(job: JobSummary) {
+  const payloadCandidate = job.payload.candidate;
+  if (!payloadCandidate || typeof payloadCandidate !== "object") {
+    return null;
+  }
+  return payloadCandidate as CandidateClip;
+}
+
+function candidateReviewSourceJob(job: JobSummary | null, jobs: JobSummary[]) {
+  if (!job) {
+    return null;
+  }
+
+  if (job.kind === "shorts_candidate_generation" && job.status === "completed") {
+    return job;
+  }
+
+  if (job.kind !== "short_export") {
+    return null;
+  }
+
+  const sourceJobId = payloadString(job, "source_candidate_job_id");
+  const sourceJob = sourceJobId ? jobs.find((item) => item.id === sourceJobId) : null;
+  return sourceJob?.kind === "shorts_candidate_generation" && sourceJob.status === "completed" ? sourceJob : null;
+}
+
+function primaryFileForJob(job: JobSummary, files: FileItem[]) {
+  const fileMap = new Map(files.map((file) => [file.id, file]));
+
+  if (job.kind === "short_export" && job.result?.output_file_ids?.length) {
+    const outputFiles = job.result.output_file_ids
+      .map((fileId) => fileMap.get(fileId))
+      .filter((file): file is FileItem => Boolean(file));
+    return outputFiles.find((file) => file.role === "candidate_clip") || outputFiles[0] || fileMap.get(job.source_file_id) || null;
+  }
+
+  return fileMap.get(job.source_file_id) || null;
+}
+
+function selectedCandidateForJob(job: JobSummary | null, jobs: JobSummary[], selectedCandidateId?: string | null) {
+  if (!job) {
+    return null;
+  }
+
+  const reviewJob = candidateReviewSourceJob(job, jobs);
+  const candidates = reviewJob?.result?.candidates || [];
+  const payloadCandidate = candidateFromPayload(job);
+
+  if (selectedCandidateId) {
+    const matchedCandidate = candidates.find((candidate) => candidate.id === selectedCandidateId);
+    if (matchedCandidate) {
+      return matchedCandidate;
+    }
+  }
+
+  if (payloadCandidate) {
+    return candidates.find((candidate) => candidate.id === payloadCandidate.id) || payloadCandidate;
+  }
+
+  return candidates[0] || null;
+}
+
 export default function ProjectDetailPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -47,17 +118,16 @@ export default function ProjectDetailPage() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [jobBusy, setJobBusy] = useState(false);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [previewStartSec, setPreviewStartSec] = useState<number | null>(null);
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("uploads");
   const [renameTarget, setRenameTarget] = useState<FileItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
 
   async function loadProject() {
     try {
-      const result = await api.getProject(projectId);
-      setProject(result);
-      setSelectedFileId((current) =>
-        current && result.files.some((file) => file.id === current) ? current : result.files[0]?.id ?? null
-      );
+      setProject(await api.getProject(projectId));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load project.");
     } finally {
@@ -79,7 +149,51 @@ export default function ProjectDetailPage() {
     void Promise.all([loadProject(), loadMeta()]);
   }, [projectId]);
 
-  const activeJobs = project?.jobs.filter((job) => job.status === "queued" || job.status === "running") || [];
+  const sortedJobs = [...(project?.jobs || [])].sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+  const activeJobs = sortedJobs.filter((job) => job.status === "queued" || job.status === "running");
+  const uploads = project?.files.filter((file) => file.kind === "upload") || [];
+  const outputs = project?.files.filter((file) => file.kind === "output") || [];
+  const selectedFile = project?.files.find((file) => file.id === selectedFileId) || null;
+  const firstJob = sortedJobs[0] ?? null;
+  const defaultJob = sortedJobs.find((job) => candidateReviewSourceJob(job, sortedJobs)) ?? firstJob;
+  const selectedJob = sortedJobs.find((job) => job.id === selectedJobId) || null;
+  const candidateReviewJob = candidateReviewSourceJob(selectedJob, sortedJobs);
+  const selectedCandidate = selectedCandidateForJob(selectedJob, sortedJobs, selectedCandidateId);
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+    setSelectedFileId((current) =>
+      current && project.files.some((file) => file.id === current)
+        ? current
+        : defaultJob
+          ? primaryFileForJob(defaultJob, project.files)?.id ?? project.files[0]?.id ?? null
+          : project.files[0]?.id ?? null
+    );
+  }, [defaultJob?.id, defaultJob?.updated_at, project?.id, project?.updated_at]);
+
+  useEffect(() => {
+    setSelectedJobId((current) => (current && sortedJobs.some((job) => job.id === current) ? current : defaultJob?.id ?? null));
+  }, [defaultJob?.id, project?.id, project?.updated_at, sortedJobs.length]);
+
+  useEffect(() => {
+    const availableCandidates = candidateReviewJob?.result?.candidates || [];
+    const fallbackCandidateId = selectedCandidateForJob(selectedJob, sortedJobs)?.id ?? null;
+    setSelectedCandidateId((current) =>
+      current && (availableCandidates.some((candidate) => candidate.id === current) || current === fallbackCandidateId)
+        ? current
+        : fallbackCandidateId
+    );
+  }, [
+    candidateReviewJob?.id,
+    candidateReviewJob?.updated_at,
+    candidateReviewJob?.result?.candidate_count,
+    firstJob?.id,
+    project?.updated_at,
+    selectedJob?.id,
+    selectedJob?.updated_at
+  ]);
 
   useEffect(() => {
     if (activeJobs.length === 0) {
@@ -91,10 +205,6 @@ export default function ProjectDetailPage() {
     return () => window.clearInterval(interval);
   }, [activeJobs.length, projectId]);
 
-  const uploads = project?.files.filter((file) => file.kind === "upload") || [];
-  const outputs = project?.files.filter((file) => file.kind === "output") || [];
-  const selectedFile = project?.files.find((file) => file.id === selectedFileId) || project?.files[0] || null;
-
   async function handleUpload(files: File[]) {
     try {
       setUploadProgress(0);
@@ -102,6 +212,7 @@ export default function ProjectDetailPage() {
       await loadProject();
       setSelectedFileId(response.files[0]?.id || null);
       setPreviewStartSec(null);
+      setLibraryTab("uploads");
       if (response.errors.length > 0) {
         toast.warning(response.errors.join(" "));
       } else {
@@ -149,7 +260,11 @@ export default function ProjectDetailPage() {
   async function handleCreateJob(payload: JobCreateRequest) {
     try {
       setJobBusy(true);
-      await api.createJob(projectId, payload);
+      const createdJob = await api.createJob(projectId, payload);
+      setSelectedJobId(createdJob.id);
+      setSelectedCandidateId(null);
+      setSelectedFileId(payload.source_file_id);
+      setPreviewStartSec(null);
       await loadProject();
       toast.success("Shorts candidate job queued.");
     } catch (error) {
@@ -171,7 +286,11 @@ export default function ProjectDetailPage() {
 
   async function handleExportCandidate(job: JobSummary, candidate: CandidateClip) {
     try {
-      await api.exportCandidate(projectId, job.id, candidate.id, job.captions_enabled);
+      const exportJob = await api.exportCandidate(projectId, job.id, candidate.id, job.captions_enabled);
+      setSelectedJobId(exportJob.id);
+      setSelectedCandidateId(candidate.id);
+      setSelectedFileId(job.source_file_id);
+      setPreviewStartSec(candidate.start_sec);
       await loadProject();
       toast.success("Short export queued.");
     } catch (error) {
@@ -180,24 +299,40 @@ export default function ProjectDetailPage() {
   }
 
   function handlePreviewCandidate(job: JobSummary, candidate: CandidateClip) {
+    setLibraryTab("uploads");
     setSelectedFileId(job.source_file_id);
     setPreviewStartSec(candidate.start_sec);
   }
 
   function handleSelectFile(file: FileItem) {
+    setLibraryTab(file.kind === "output" ? "outputs" : "uploads");
     setSelectedFileId(file.id);
     setPreviewStartSec(null);
   }
 
+  function handleSelectRun(job: JobSummary) {
+    const nextCandidate = selectedCandidateForJob(job, sortedJobs, selectedCandidateId);
+    const nextFile = project ? primaryFileForJob(job, project.files) : null;
+    setLibraryTab(nextFile?.kind === "output" ? "outputs" : "uploads");
+    setSelectedJobId(job.id);
+    setSelectedCandidateId(nextCandidate?.id ?? null);
+    setSelectedFileId(nextFile?.id ?? job.source_file_id);
+    setPreviewStartSec(nextFile && nextFile.id !== job.source_file_id ? null : nextCandidate?.start_sec ?? null);
+  }
+
+  function handleSelectCandidate(job: JobSummary, candidate: CandidateClip) {
+    setLibraryTab("uploads");
+    setSelectedJobId(job.id);
+    setSelectedCandidateId(candidate.id);
+    setSelectedFileId(job.source_file_id);
+    setPreviewStartSec(candidate.start_sec);
+  }
+
   if (loading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-[220px] w-full rounded-[34px]" />
-        <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)_380px]">
-          <Skeleton className="h-[740px] rounded-[28px]" />
-          <Skeleton className="h-[740px] rounded-[28px]" />
-          <Skeleton className="h-[740px] rounded-[28px]" />
-        </div>
+      <div className="flex flex-col gap-4 lg:h-full lg:min-h-0 lg:overflow-hidden">
+        <Skeleton className="h-[170px] w-full rounded-[34px]" />
+        <Skeleton className="h-[720px] w-full rounded-[36px]" />
       </div>
     );
   }
@@ -212,12 +347,15 @@ export default function ProjectDetailPage() {
     );
   }
 
+  const libraryFiles = libraryTab === "uploads" ? uploads : outputs;
+
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4 lg:h-full lg:min-h-0 lg:overflow-hidden">
       <PageHeader
+        compact
         eyebrow="Project Workspace"
         title={project.name}
-        description={`Created ${formatDateTime(project.created_at)}. Upload one long source, generate ranked shorts candidates, then export the clips worth testing.`}
+        description={`Created ${formatDateTime(project.created_at)}. Keep source media, ranked runs, and exports inside one bounded review workspace.`}
         actions={
           selectedFile ? (
             <Button variant="secondary" asChild>
@@ -230,51 +368,132 @@ export default function ProjectDetailPage() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)_380px]">
-        <div className="space-y-6">
-          <UploadDropzone uploadProgress={uploadProgress} onFilesSelected={handleUpload} disabled={jobBusy} />
-          <FileList
-            title="Uploads"
-            description="Long-form source media from the browser."
-            files={uploads}
-            selectedFileId={selectedFileId}
-            emptyMessage="Drag raw media into the upload area to get started."
-            onSelect={handleSelectFile}
-            onRename={setRenameTarget}
-            onDelete={setDeleteTarget}
-          />
-          <FileList
-            title="Outputs"
-            description="Candidate manifests, exported shorts, captions, thumbnails, and logs."
-            files={outputs}
-            selectedFileId={selectedFileId}
-            emptyMessage="Generated artifacts will appear here after a run finishes."
-            onSelect={handleSelectFile}
-            onRename={setRenameTarget}
-            onDelete={setDeleteTarget}
-          />
-        </div>
+      <div className="app-frame flex min-h-0 flex-1 flex-col overflow-hidden rounded-[34px] border border-border/70 p-3 shadow-soft lg:p-4">
+        <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(240px,0.95fr)_minmax(0,1.45fr)_minmax(320px,1.05fr)]">
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+            <FileList
+              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+              contentClassName="px-4 pb-4 pt-0"
+              listClassName="pb-1"
+              title="Library"
+              description={
+                libraryTab === "uploads"
+                  ? `${uploads.length} source file${uploads.length === 1 ? "" : "s"} ready for review.`
+                  : `${outputs.length} generated artifact${outputs.length === 1 ? "" : "s"} in this project.`
+              }
+              actions={
+                <div className="flex items-center gap-1 rounded-full border border-border/70 bg-card/80 p-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={libraryTab === "uploads" ? "default" : "ghost"}
+                    onClick={() => setLibraryTab("uploads")}
+                  >
+                    Uploads
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={libraryTab === "outputs" ? "default" : "ghost"}
+                    onClick={() => setLibraryTab("outputs")}
+                  >
+                    Outputs
+                  </Button>
+                </div>
+              }
+              lead={
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="panel-inset rounded-[18px] px-3 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Uploads</p>
+                      <p className="mt-2 text-base font-semibold text-foreground">{project.status_summary.upload_count}</p>
+                    </div>
+                    <div className="panel-inset rounded-[18px] px-3 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Outputs</p>
+                      <p className="mt-2 text-base font-semibold text-foreground">{project.status_summary.output_count}</p>
+                    </div>
+                    <div className="panel-inset rounded-[18px] px-3 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Active</p>
+                      <p className="mt-2 text-base font-semibold text-foreground">{activeJobs.length}</p>
+                    </div>
+                  </div>
 
-        <MediaPreview file={selectedFile} previewStartSec={previewStartSec} />
+                  <div className="panel-inset rounded-[20px] px-4 py-3">
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Focused preview</p>
+                    <p className="mt-2 truncate text-sm font-medium text-foreground">{selectedFile?.name || "Nothing selected"}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Updated {formatDateTime(project.updated_at)}</p>
+                  </div>
 
-        <div className="space-y-6">
-          <GeneratePanel
-            uploads={uploads}
-            presets={presets}
-            defaultPreset={settings.default_preset}
-            defaultAggressiveness={settings.cut_aggressiveness}
-            defaultCaptions={settings.captions_enabled}
-            busy={jobBusy}
-            onSubmit={handleCreateJob}
-          />
-          <JobFeed
-            jobs={project.jobs}
-            files={project.files}
-            onCancel={(job) => handleCancelJob(job.id)}
-            onExportCandidate={handleExportCandidate}
-            onPreviewCandidate={handlePreviewCandidate}
-            onSelectFile={handleSelectFile}
-          />
+                  <UploadDropzone compact uploadProgress={uploadProgress} onFilesSelected={handleUpload} disabled={jobBusy} />
+                </div>
+              }
+              files={libraryFiles}
+              selectedFileId={selectedFileId}
+              emptyMessage={
+                libraryTab === "uploads"
+                  ? "Drag raw media into the upload area to get started."
+                  : "Generated artifacts will appear here after a run finishes."
+              }
+              onSelect={handleSelectFile}
+              onRename={setRenameTarget}
+              onDelete={setDeleteTarget}
+            />
+          </div>
+
+          <div className="grid min-h-0 min-w-0 gap-4 overflow-hidden xl:grid-rows-[minmax(0,1.15fr)_minmax(0,0.95fr)]">
+            <div className="min-h-0 min-w-0">
+              <MediaPreview file={selectedFile} previewStartSec={previewStartSec} />
+            </div>
+
+            <div className="min-h-0 min-w-0">
+              <CandidateList
+                className="h-full"
+                sourceJob={candidateReviewJob}
+                jobs={sortedJobs}
+                selectedCandidate={selectedCandidate}
+                selectedCandidateId={selectedCandidateId}
+                onSelectCandidate={handleSelectCandidate}
+              />
+            </div>
+          </div>
+
+          <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto overscroll-contain pr-1">
+            <div className="shrink-0 min-w-0">
+              <GeneratePanel
+                className="min-w-0"
+                uploads={uploads}
+                presets={presets}
+                defaultPreset={settings.default_preset}
+                defaultAggressiveness={settings.cut_aggressiveness}
+                defaultCaptions={settings.captions_enabled}
+                busy={jobBusy}
+                onSubmit={handleCreateJob}
+              />
+            </div>
+
+            <div className="shrink-0 min-w-0">
+                <JobFeed
+                  className="max-h-[280px]"
+                  jobs={sortedJobs}
+                  selectedJobId={selectedJobId}
+                  onSelectJob={handleSelectRun}
+                  onCancel={(job) => handleCancelJob(job.id)}
+                />
+            </div>
+
+            <div className="min-h-0 min-w-0">
+                <JobInspector
+                  className="min-h-[320px]"
+                  job={selectedJob}
+                  candidate={selectedCandidate}
+                  jobs={sortedJobs}
+                  files={project.files}
+                  onExportCandidate={handleExportCandidate}
+                  onPreviewCandidate={handlePreviewCandidate}
+                  onSelectFile={handleSelectFile}
+                />
+            </div>
+          </div>
         </div>
       </div>
 

@@ -10,6 +10,14 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+class PlannerRequestError(RuntimeError):
+    pass
+
+
+class PlannerTimeoutError(PlannerRequestError):
+    pass
+
+
 @dataclass(frozen=True)
 class NormalizedEndpoints:
     original_base_url: str
@@ -154,19 +162,23 @@ def _request_openai_completion(
     try:
         response = client.post(endpoints.openai_chat_url, json=payload)
         response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise PlannerTimeoutError(
+            f"Planner request to OpenAI-compatible /v1/chat/completions failed: {exc}."
+        ) from exc
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
             raise
-        raise RuntimeError(
+        raise PlannerRequestError(
             f"Planner request to OpenAI-compatible /v1/chat/completions failed ({exc.response.status_code} {exc.response.reason_phrase})."
         ) from exc
     except httpx.HTTPError as exc:
-        raise RuntimeError(f"Planner request to OpenAI-compatible /v1/chat/completions failed: {exc}.") from exc
+        raise PlannerRequestError(f"Planner request to OpenAI-compatible /v1/chat/completions failed: {exc}.") from exc
 
     try:
         data = response.json()
     except ValueError as exc:
-        raise RuntimeError("Planner backend returned invalid JSON from OpenAI-compatible /v1/chat/completions.") from exc
+        raise PlannerRequestError("Planner backend returned invalid JSON from OpenAI-compatible /v1/chat/completions.") from exc
     return _normalize_openai_response(data)
 
 
@@ -191,17 +203,19 @@ def _request_ollama_completion(
     try:
         response = client.post(endpoints.ollama_chat_url, json=payload)
         response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise PlannerTimeoutError(f"Planner request to Ollama-native /api/chat failed: {exc}.") from exc
     except httpx.HTTPStatusError as exc:
-        raise RuntimeError(
+        raise PlannerRequestError(
             f"Planner request to Ollama-native /api/chat failed ({exc.response.status_code} {exc.response.reason_phrase})."
         ) from exc
     except httpx.HTTPError as exc:
-        raise RuntimeError(f"Planner request to Ollama-native /api/chat failed: {exc}.") from exc
+        raise PlannerRequestError(f"Planner request to Ollama-native /api/chat failed: {exc}.") from exc
 
     try:
         data = response.json()
     except ValueError as exc:
-        raise RuntimeError("Planner backend returned invalid JSON from Ollama-native /api/chat.") from exc
+        raise PlannerRequestError("Planner backend returned invalid JSON from Ollama-native /api/chat.") from exc
     return _normalize_ollama_response(data)
 
 

@@ -26,8 +26,8 @@ export function MediaPreview({ file, previewStartSec }: { file?: FileItem | null
 
   if (!file) {
     return (
-      <Card className="h-full">
-        <CardContent className="flex min-h-[360px] flex-col items-center justify-center gap-4 text-center">
+      <Card className="flex h-full min-h-0 flex-col overflow-hidden">
+        <CardContent className="flex min-h-[360px] flex-1 flex-col items-center justify-center gap-4 text-center">
           <div className="flex size-16 items-center justify-center rounded-3xl bg-muted text-muted-foreground">
             <Film className="size-7" />
           </div>
@@ -43,8 +43,8 @@ export function MediaPreview({ file, previewStartSec }: { file?: FileItem | null
   }
 
   return (
-    <Card className="h-full">
-      <CardHeader className="gap-4">
+    <Card className="flex h-full min-h-0 flex-col overflow-hidden">
+      <CardHeader className="gap-4 border-b border-border/60 pb-5">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="panel-label">{file.kind === "upload" ? "Source Media" : "Generated Output"}</p>
@@ -53,14 +53,14 @@ export function MediaPreview({ file, previewStartSec }: { file?: FileItem | null
           <Badge variant="muted">{file.role.replace(/_/g, " ")}</Badge>
         </div>
       </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="overflow-hidden rounded-[28px] border border-border/70 bg-[#f5f1ea]">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden">
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[28px] border border-border/70 bg-muted/70">
           {isVideo ? (
             <video
               ref={videoRef}
               key={file.id}
               controls
-              className="max-h-[720px] w-full bg-black object-contain"
+              className="h-full max-h-[720px] w-full bg-black object-contain"
               src={file.preview_url || file.download_url}
               onLoadedMetadata={(event) => {
                 if (previewStartSec !== null && previewStartSec !== undefined) {
@@ -69,14 +69,14 @@ export function MediaPreview({ file, previewStartSec }: { file?: FileItem | null
               }}
             />
           ) : isAudio ? (
-            <div className="flex min-h-[260px] flex-col items-center justify-center gap-5 px-8 py-10">
+            <div className="flex min-h-[260px] w-full flex-col items-center justify-center gap-5 px-8 py-10">
               <div className="flex size-16 items-center justify-center rounded-3xl bg-primary/10 text-primary">
                 <Music4 className="size-7" />
               </div>
               <audio key={file.id} controls className="w-full max-w-lg" src={file.preview_url || file.download_url} />
             </div>
           ) : (
-            <div className="flex min-h-[260px] flex-col items-center justify-center gap-4 px-8 py-10 text-center">
+            <div className="flex min-h-[260px] w-full flex-col items-center justify-center gap-4 px-8 py-10 text-center">
               <div className="flex size-16 items-center justify-center rounded-3xl bg-primary/10 text-primary">
                 <FileText className="size-7" />
               </div>

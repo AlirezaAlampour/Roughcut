@@ -155,7 +155,7 @@ export function SettingsForm({
               <Label>Transcription model</Label>
               <Input value={values.transcription_model} readOnly />
             </div>
-            <div className="rounded-[22px] border border-border/70 bg-white/70 p-4 lg:col-span-2">
+            <div className="rounded-[22px] border border-border/70 bg-card/70 p-4 lg:col-span-2">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <Label>Detailed planner logging</Label>

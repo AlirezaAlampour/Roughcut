@@ -12,9 +12,10 @@ interface UploadDropzoneProps {
   disabled?: boolean;
   uploadProgress: number | null;
   onFilesSelected: (files: File[]) => void;
+  compact?: boolean;
 }
 
-export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelected }: UploadDropzoneProps) {
+export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelected, compact = false }: UploadDropzoneProps) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -22,8 +23,11 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
     if (uploadProgress !== null) {
       return `Uploading ${uploadProgress}%`;
     }
+    if (compact) {
+      return "Drop a source here or pick files from your computer.";
+    }
     return "Drop one long-form video or audio source here, or choose a file from your computer.";
-  }, [uploadProgress]);
+  }, [compact, uploadProgress]);
 
   function emitFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0 || disabled) {
@@ -36,7 +40,7 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
     <Card
       className={cn(
         "border-dashed transition",
-        dragging ? "border-primary/50 bg-accent/30" : "border-border/80 bg-white/80",
+        dragging ? "border-primary/50 bg-accent/30" : "border-border/80 bg-card/85",
         disabled && "opacity-70"
       )}
       onDragOver={(event) => {
@@ -50,16 +54,26 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
         emitFiles(event.dataTransfer.files);
       }}
     >
-      <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
-        <div className="flex size-14 items-center justify-center rounded-3xl bg-primary/10 text-primary">
-          <CloudUpload className="size-6" />
+      <CardContent className={cn("flex flex-col items-center text-center", compact ? "gap-3 px-4 py-4" : "gap-4 px-6 py-8")}>
+        <div className={cn("flex items-center justify-center rounded-3xl bg-primary/10 text-primary", compact ? "size-11" : "size-14")}>
+          <CloudUpload className={cn(compact ? "size-5" : "size-6")} />
         </div>
-        <div className="space-y-2">
-          <h3 className="text-lg font-medium tracking-tight text-foreground">Upload long-form source</h3>
-          <p className="max-w-md text-sm leading-6 text-muted-foreground">{helperText}</p>
+        <div className={cn(compact ? "space-y-1" : "space-y-2")}>
+          <h3 className={cn("font-medium tracking-tight text-foreground", compact ? "text-base" : "text-lg")}>
+            Upload long-form source
+          </h3>
+          <p className={cn("text-muted-foreground", compact ? "max-w-sm text-xs leading-5" : "max-w-md text-sm leading-6")}>
+            {helperText}
+          </p>
         </div>
-        {uploadProgress !== null ? <Progress value={uploadProgress} className="max-w-sm" /> : null}
-        <Button type="button" variant="secondary" disabled={disabled} onClick={() => inputRef.current?.click()}>
+        {uploadProgress !== null ? <Progress value={uploadProgress} className={cn("w-full", compact ? "" : "max-w-sm")} /> : null}
+        <Button
+          type="button"
+          variant="secondary"
+          size={compact ? "sm" : "default"}
+          disabled={disabled}
+          onClick={() => inputRef.current?.click()}
+        >
           <Plus className="mr-2 size-4" />
           Choose files
         </Button>

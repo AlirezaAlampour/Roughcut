@@ -301,10 +301,41 @@ class CandidateScoreItem(BaseModel):
     duplicate_group: str | None = Field(default=None, max_length=80)
 
 
+class CandidateBatchScoreItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    score_total: float = Field(ge=0, le=100)
+    score_breakdown: CandidateScoreBreakdown
+    tags: list[str] = Field(default_factory=list, max_length=8)
+    duplicate_group: str | None = Field(default=None, max_length=80)
+
+
+class CandidateEnrichmentItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str = Field(min_length=1, max_length=120)
+    hook_text: str = Field(min_length=1, max_length=240)
+    rationale: str = Field(min_length=1, max_length=600)
+
+
 class CandidateScoringResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     candidates: list[CandidateScoreItem]
+
+
+class CandidateBatchScoringResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[CandidateBatchScoreItem]
+
+
+class CandidateEnrichmentResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[CandidateEnrichmentItem]
 
 
 class CandidateManifest(BaseModel):

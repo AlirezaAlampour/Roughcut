@@ -114,7 +114,7 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="space-y-6 lg:space-y-7">
+    <div className="space-y-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1 lg:space-y-7">
       <PageHeader
         eyebrow="Projects"
         title="Find the shorts hiding in long videos."

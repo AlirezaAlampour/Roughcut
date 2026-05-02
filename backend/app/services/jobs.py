@@ -538,7 +538,7 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                 message="No candidate windows found; skipping planner scoring.",
                 severity="warning",
             )
-        scored_candidates = (
+        scoring_outcome = (
             planner.score_short_candidates(
                 settings=settings,
                 llm_base_url=payload.get("llm_base_url", ""),
@@ -552,8 +552,9 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                 artifact_dir=outputs_dir if settings.enable_detailed_planner_logging else None,
             )
             if candidate_windows
-            else []
+            else planner.CandidateScoringOutcome(candidates=[])
         )
+        scored_candidates = scoring_outcome.candidates
         for message in planner_messages:
             _log_and_trace(
                 log_lines,
@@ -561,6 +562,16 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                 stage="planner scoring",
                 event="message",
                 message=message,
+            )
+        for event in scoring_outcome.trace_events:
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage=event.stage,
+                event=event.event,
+                message=event.message,
+                severity=event.severity,
+                payload=event.payload,
             )
         if candidate_windows:
             trace.emit(
@@ -595,6 +606,7 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
         elif not scored_candidates:
             notes_for_user.append("No usable shorts candidate windows were found in the transcript.")
         else:
+            notes_for_user.extend(scoring_outcome.notes_for_user)
             notes_for_user.append(f"Generated and ranked {len(scored_candidates)} shorts candidates.")
 
         manifest = CandidateManifest(

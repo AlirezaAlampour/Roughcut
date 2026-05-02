@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { Aggressiveness, FileItem, JobCreateRequest, PresetConfig } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface GeneratePanelProps {
   uploads: FileItem[];
@@ -19,6 +20,7 @@ interface GeneratePanelProps {
   defaultCaptions?: boolean;
   busy?: boolean;
   onSubmit: (payload: JobCreateRequest) => Promise<void> | void;
+  className?: string;
 }
 
 export function GeneratePanel({
@@ -28,7 +30,8 @@ export function GeneratePanel({
   defaultAggressiveness = "balanced",
   defaultCaptions = true,
   busy = false,
-  onSubmit
+  onSubmit,
+  className
 }: GeneratePanelProps) {
   const [sourceFileId, setSourceFileId] = useState("");
   const [presetId, setPresetId] = useState(defaultPreset || "");
@@ -51,14 +54,14 @@ export function GeneratePanel({
   const activePreset = presets.find((preset) => preset.id === presetId);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-xl">Generate shorts candidates</CardTitle>
+    <Card className={cn("overflow-hidden", className)}>
+      <CardHeader className="pb-4">
+        <CardTitle className="text-lg">Generate shorts candidates</CardTitle>
         <CardDescription>
-          Pick one long source, choose a shorts preset, and let the local planner rank candidate clips.
+          Pick a source, choose a shorts preset, and let the local planner rank compact candidate clips.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label>Source media</Label>
           <Select value={sourceFileId} onValueChange={setSourceFileId}>
@@ -90,7 +93,7 @@ export function GeneratePanel({
             </SelectContent>
           </Select>
           {activePreset ? (
-            <p className="text-sm leading-6 text-muted-foreground">
+            <p className="line-clamp-2 text-sm leading-5 text-muted-foreground">
               {activePreset.description} Targets {activePreset.target_clip_min_sec}-{activePreset.target_clip_max_sec}s.
             </p>
           ) : null}
@@ -110,24 +113,30 @@ export function GeneratePanel({
           </Select>
         </div>
 
-        <div className="grid gap-4 rounded-[26px] bg-muted/80 p-4">
-          <div className="flex items-center justify-between gap-4">
+        <details className="rounded-[22px] border border-border/70 bg-card/70 p-3.5">
+          <summary className="cursor-pointer text-sm font-medium text-foreground">Output options</summary>
+          <div className="mt-3 flex items-center justify-between gap-4 rounded-[18px] bg-muted/80 px-3.5 py-3">
             <div>
               <Label>Burn captions into output</Label>
-              <p className="mt-1 text-sm text-muted-foreground">Candidate exports still include SRT and VTT when available.</p>
+              <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                Candidate exports still include SRT and VTT when available.
+              </p>
             </div>
             <Switch checked={captionsEnabled} onCheckedChange={setCaptionsEnabled} />
           </div>
-        </div>
+        </details>
 
-        <div className="space-y-2">
-          <Label>Notes for the planner</Label>
-          <Textarea
-            placeholder="Examples: favor local AI lessons, avoid salesy CTAs, prefer blunt technical takes."
-            value={userNotes}
-            onChange={(event) => setUserNotes(event.target.value)}
-          />
-        </div>
+        <details className="rounded-[22px] border border-border/70 bg-card/70 p-3.5" open={Boolean(userNotes)}>
+          <summary className="cursor-pointer text-sm font-medium text-foreground">Planner notes (optional)</summary>
+          <div className="mt-3">
+            <Textarea
+              className="min-h-[96px]"
+              placeholder="Examples: favor local AI lessons, avoid salesy CTAs, prefer blunt technical takes."
+              value={userNotes}
+              onChange={(event) => setUserNotes(event.target.value)}
+            />
+          </div>
+        </details>
 
         <Button
           size="lg"

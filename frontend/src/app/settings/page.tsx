@@ -32,7 +32,7 @@ export default function SettingsPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <PageHeader
         eyebrow="Configuration"
         title="Keep the setup small."
