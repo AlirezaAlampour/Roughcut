@@ -18,20 +18,19 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground lg:h-screen lg:overflow-hidden">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1760px] flex-col gap-4 px-4 pb-4 pt-4 lg:h-full lg:min-h-0 lg:flex-row lg:gap-4 lg:px-5 lg:py-5">
-        <aside className="app-frame flex shrink-0 flex-col rounded-[28px] border border-border/60 px-4 py-4 shadow-soft backdrop-blur lg:h-full lg:w-[80px] lg:items-center lg:px-2.5 lg:py-3.5">
-          <div className="flex items-center gap-2.5 lg:flex-col lg:gap-0">
-            <div className="flex size-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lift lg:size-10">
-              <Clapperboard className="size-[18px]" />
-            </div>
-            <div className="lg:mt-2 lg:text-center">
-              <p className="font-serif text-[1.55rem] tracking-tight lg:hidden">Roughcut</p>
-              <p className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground lg:hidden">Local shorts</p>
-              <p className="hidden text-[10px] font-medium uppercase tracking-[0.24em] text-muted-foreground lg:block">RC</p>
-            </div>
-          </div>
+      <div className="flex min-h-screen w-full min-w-0 items-stretch lg:h-full">
+        <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col items-center border-r border-zinc-900 bg-zinc-950 px-2 py-4 text-zinc-100 shadow-soft">
+          <Link
+            href="/"
+            aria-label="Roughcut home"
+            title="Roughcut home"
+            className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lift transition hover:opacity-95"
+          >
+            <Clapperboard className="size-[18px]" />
+            <span className="sr-only">Roughcut home</span>
+          </Link>
 
-          <nav className="mt-6 flex gap-2 overflow-x-auto lg:min-h-0 lg:flex-1 lg:flex-col lg:items-center lg:gap-2.5 lg:overflow-visible">
+          <nav className="mt-8 flex min-h-0 flex-1 flex-col items-center gap-3 overflow-y-auto">
             {navigation.map((item) => {
               const Icon = item.icon;
               const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
@@ -42,26 +41,31 @@ export function AppShell({ children }: { children: ReactNode }) {
                   aria-label={item.label}
                   title={item.label}
                   className={cn(
-                    "flex min-w-fit items-center gap-3 rounded-[18px] px-3.5 py-2.5 text-sm transition lg:size-10 lg:min-w-0 lg:justify-center lg:gap-0 lg:px-0",
+                    "flex size-11 items-center justify-center rounded-2xl text-sm transition",
                     active
                       ? "bg-primary text-primary-foreground shadow-lift"
-                      : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                      : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
                   )}
                 >
                   <Icon className="size-4" />
-                  <span className="lg:sr-only">{item.label}</span>
                 </Link>
               );
             })}
           </nav>
 
-          <div className="mt-auto flex items-center justify-between border-t border-border/60 pt-3 lg:w-full lg:justify-center lg:pt-2.5">
-            <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground lg:hidden">Theme</span>
-            <ThemeToggle compact />
+          <div className="mt-auto flex w-full justify-center border-t border-zinc-900 pt-3">
+            <ThemeToggle
+              compact
+              className="border-zinc-800 bg-zinc-900/80 text-zinc-100 hover:bg-zinc-800 hover:text-zinc-100"
+            />
           </div>
         </aside>
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
+        <main className="flex min-h-screen min-w-0 flex-1 flex-col overflow-hidden lg:h-full lg:min-h-0">
+          <div className="flex min-h-screen min-w-0 flex-1 flex-col px-4 py-4 lg:min-h-0 lg:px-5 lg:py-5">
+            {children}
+          </div>
+        </main>
       </div>
     </div>
   );

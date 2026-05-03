@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { WandSparkles } from "lucide-react";
+import { ChevronDown, WandSparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -65,7 +65,7 @@ export function GeneratePanel({
         <div className="space-y-2">
           <Label>Source media</Label>
           <Select value={sourceFileId} onValueChange={setSourceFileId}>
-            <SelectTrigger>
+            <SelectTrigger className="h-10">
               <SelectValue placeholder="Choose a source file" />
             </SelectTrigger>
             <SelectContent>
@@ -81,7 +81,7 @@ export function GeneratePanel({
         <div className="space-y-2">
           <Label>Preset</Label>
           <Select value={presetId} onValueChange={setPresetId}>
-            <SelectTrigger>
+            <SelectTrigger className="h-10">
               <SelectValue placeholder="Choose a preset" />
             </SelectTrigger>
             <SelectContent>
@@ -102,7 +102,7 @@ export function GeneratePanel({
         <div className="space-y-2">
           <Label>Candidate density</Label>
           <Select value={aggressiveness} onValueChange={(value) => setAggressiveness(value as Aggressiveness)}>
-            <SelectTrigger>
+            <SelectTrigger className="h-10">
               <SelectValue placeholder="Select density" />
             </SelectTrigger>
             <SelectContent>
@@ -113,34 +113,42 @@ export function GeneratePanel({
           </Select>
         </div>
 
-        <details className="rounded-[22px] border border-border/70 bg-card/70 p-3.5">
-          <summary className="cursor-pointer text-sm font-medium text-foreground">Output options</summary>
-          <div className="mt-3 flex items-center justify-between gap-4 rounded-[18px] bg-muted/80 px-3.5 py-3">
+        <details className="group rounded-[22px] border border-border/70 bg-card/70 p-4">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
             <div>
-              <Label>Burn captions into output</Label>
-              <p className="mt-1 text-sm leading-5 text-muted-foreground">
-                Candidate exports still include SRT and VTT when available.
+              <p className="text-sm font-medium text-foreground">Advanced Settings</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Fine-tune output behavior and planner guidance when you need more control.
               </p>
             </div>
-            <Switch checked={captionsEnabled} onCheckedChange={setCaptionsEnabled} />
-          </div>
-        </details>
+            <ChevronDown className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+          </summary>
 
-        <details className="rounded-[22px] border border-border/70 bg-card/70 p-3.5" open={Boolean(userNotes)}>
-          <summary className="cursor-pointer text-sm font-medium text-foreground">Planner notes (optional)</summary>
-          <div className="mt-3">
-            <Textarea
-              className="min-h-[96px]"
-              placeholder="Examples: favor local AI lessons, avoid salesy CTAs, prefer blunt technical takes."
-              value={userNotes}
-              onChange={(event) => setUserNotes(event.target.value)}
-            />
+          <div className="mt-4 space-y-4">
+            <div className="flex items-center justify-between gap-4 rounded-[18px] bg-muted/80 px-3.5 py-3">
+              <div>
+                <Label>Burn captions into output</Label>
+                <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                  Candidate exports still include SRT and VTT when available.
+                </p>
+              </div>
+              <Switch checked={captionsEnabled} onCheckedChange={setCaptionsEnabled} />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Planner notes (optional)</Label>
+              <Textarea
+                className="min-h-[110px] resize-none"
+                placeholder="Examples: favor local AI lessons, avoid salesy CTAs, prefer blunt technical takes."
+                value={userNotes}
+                onChange={(event) => setUserNotes(event.target.value)}
+              />
+            </div>
           </div>
         </details>
 
         <Button
-          size="lg"
-          className="w-full"
+          className="h-10 w-full"
           disabled={busy || !sourceFileId || !presetId || uploads.length === 0}
           onClick={() =>
             onSubmit({

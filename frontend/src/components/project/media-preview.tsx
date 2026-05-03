@@ -71,7 +71,7 @@ export function MediaPreview({
         </CardHeader>
       ) : null}
       <CardContent className={cn("flex flex-col gap-6 overflow-hidden", showHeader ? "" : "px-5 pb-5 pt-5")}>
-        <div className="flex min-h-[340px] items-center justify-center overflow-hidden rounded-[30px] border border-border/70 bg-[radial-gradient(circle_at_top,rgba(206,188,155,0.08),transparent_34%),linear-gradient(180deg,rgba(11,10,9,0.72),rgba(11,10,9,0.96))] lg:min-h-[520px]">
+        <div className="flex min-h-[340px] items-center justify-center overflow-hidden rounded-[30px] border border-border/70 bg-zinc-950 lg:min-h-[520px]">
           {isVideo ? (
             <video
               ref={videoRef}

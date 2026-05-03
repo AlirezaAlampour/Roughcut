@@ -214,7 +214,6 @@ export default function ProjectDetailPage() {
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [clipEditorOpen, setClipEditorOpen] = useState(false);
-  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [runsDialogOpen, setRunsDialogOpen] = useState(false);
 
@@ -675,6 +674,14 @@ export default function ProjectDetailPage() {
     : selectedCandidateClip
       ? "Re-export Selected"
       : "Export Selected";
+  const libraryDescription =
+    libraryTab === "uploads"
+      ? `${uploads.length} source file${uploads.length === 1 ? "" : "s"} ready for review.`
+      : `${outputs.length} generated artifact${outputs.length === 1 ? "" : "s"} in this project.`;
+  const libraryEmptyMessage =
+    libraryTab === "uploads"
+      ? "Use the upload controls here to add source media."
+      : "Generated artifacts will appear here after exports finish.";
 
   return (
     <div className="flex flex-col gap-5 lg:h-full lg:overflow-y-auto lg:pr-1">
@@ -751,9 +758,6 @@ export default function ProjectDetailPage() {
                 <Download className="mr-2 size-4" />
                 {exportLabel}
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => setGenerateDialogOpen(true)}>
-                Options
-              </Button>
               <Button variant="secondary" size="sm" onClick={() => setLibraryDialogOpen(true)}>
                 <FolderOpen className="mr-2 size-4" />
                 Library
@@ -787,52 +791,131 @@ export default function ProjectDetailPage() {
         />
       </div>
 
-      <section className="space-y-4">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="panel-label">Preview Stage</p>
-              {selectedCandidate ? <Badge>{Math.round(selectedCandidate.score_total)} score</Badge> : null}
-              {selectedCandidateClip ? <Badge variant="success">Rendered</Badge> : null}
-              {selectedCandidateEdited ? <Badge variant="muted">Edited</Badge> : null}
-              {!selectedCandidateEdited && selectedUsingProjectDefault ? <Badge variant="muted">Project default</Badge> : null}
-              {selectedCandidateActiveExport ? <Badge variant="warning">Exporting</Badge> : null}
-              {selectedCandidate ? (
-                <Badge variant="muted">
-                  {formatDuration(selectedCandidate.end_sec - selectedCandidate.start_sec)} at{" "}
-                  {formatTimestamp(selectedCandidate.start_sec, 1)}
-                </Badge>
-              ) : null}
-            </div>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{previewTitle}</h2>
-            <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">{previewDescription}</p>
-          </div>
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-start">
+        <div className="min-w-0 space-y-6">
+          <section className="space-y-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="panel-label">Preview Stage</p>
+                  {selectedCandidate ? <Badge>{Math.round(selectedCandidate.score_total)} score</Badge> : null}
+                  {selectedCandidateClip ? <Badge variant="success">Rendered</Badge> : null}
+                  {selectedCandidateEdited ? <Badge variant="muted">Edited</Badge> : null}
+                  {!selectedCandidateEdited && selectedUsingProjectDefault ? <Badge variant="muted">Project default</Badge> : null}
+                  {selectedCandidateActiveExport ? <Badge variant="warning">Exporting</Badge> : null}
+                  {selectedCandidate ? (
+                    <Badge variant="muted">
+                      {formatDuration(selectedCandidate.end_sec - selectedCandidate.start_sec)} at{" "}
+                      {formatTimestamp(selectedCandidate.start_sec, 1)}
+                    </Badge>
+                  ) : null}
+                </div>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{previewTitle}</h2>
+                <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">{previewDescription}</p>
+              </div>
 
-            <div className="flex flex-wrap gap-2">
-            {selectedCandidate && candidateReviewJob ? (
-              <Button variant="secondary" onClick={() => handleOpenCandidateEditor(candidateReviewJob, selectedCandidate)}>
-                <SlidersHorizontal className="mr-2 size-4" />
-                Edit clip
-              </Button>
-            ) : null}
-            {selectedCandidate && candidateReviewJob ? (
-              <Button variant="secondary" onClick={() => handleOpenCandidateDetails(candidateReviewJob, selectedCandidate)}>
-                <PanelRightOpen className="mr-2 size-4" />
-                Open details
-              </Button>
-            ) : null}
-            {downloadTarget ? (
-              <Button variant="secondary" asChild>
-                <a href={downloadTarget.download_url} download>
-                  <Download className="mr-2 size-4" />
-                  {selectedCandidateClip ? "Download clip" : "Download focus"}
-                </a>
-              </Button>
-            ) : null}
-          </div>
+              <div className="flex flex-wrap gap-2">
+                {selectedCandidate && candidateReviewJob ? (
+                  <Button variant="secondary" onClick={() => handleOpenCandidateEditor(candidateReviewJob, selectedCandidate)}>
+                    <SlidersHorizontal className="mr-2 size-4" />
+                    Edit clip
+                  </Button>
+                ) : null}
+                {selectedCandidate && candidateReviewJob ? (
+                  <Button variant="secondary" onClick={() => handleOpenCandidateDetails(candidateReviewJob, selectedCandidate)}>
+                    <PanelRightOpen className="mr-2 size-4" />
+                    Open details
+                  </Button>
+                ) : null}
+                {downloadTarget ? (
+                  <Button variant="secondary" asChild>
+                    <a href={downloadTarget.download_url} download>
+                      <Download className="mr-2 size-4" />
+                      {selectedCandidateClip ? "Download clip" : "Download focus"}
+                    </a>
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            <MediaPreview
+              file={focusedPreviewFile}
+              previewStartSec={focusedPreviewStartSec}
+              showHeader={false}
+              showMetadata={false}
+            />
+          </section>
+
+          <FileList
+            title="Project library"
+            description={libraryDescription}
+            actions={
+              <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 p-1">
+                <Button type="button" size="sm" variant={libraryTab === "uploads" ? "default" : "ghost"} onClick={() => setLibraryTab("uploads")}>
+                  Uploads
+                </Button>
+                <Button type="button" size="sm" variant={libraryTab === "outputs" ? "default" : "ghost"} onClick={() => setLibraryTab("outputs")}>
+                  Outputs
+                </Button>
+              </div>
+            }
+            files={libraryFiles}
+            selectedFileId={selectedFileId}
+            emptyMessage={libraryEmptyMessage}
+            onSelect={handleSelectFile}
+            onRename={setRenameTarget}
+            onDelete={setDeleteTarget}
+            className="xl:h-[440px]"
+            contentClassName="min-h-0"
+            listClassName="min-h-0 flex-1 overflow-y-auto"
+            lead={
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+                <UploadDropzone
+                  uploadPhase={uploadPhase}
+                  uploadProgress={uploadProgress}
+                  onFilesSelected={handleUpload}
+                  disabled={uploadBusy || jobBusy}
+                />
+
+                <div className="panel-gradient rounded-[28px] border border-border/70 p-4 shadow-soft">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="panel-inset rounded-[18px] px-3 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Uploads</p>
+                      <p className="mt-2 text-base font-semibold text-foreground">{uploads.length}</p>
+                    </div>
+                    <div className="panel-inset rounded-[18px] px-3 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Outputs</p>
+                      <p className="mt-2 text-base font-semibold text-foreground">{outputs.length}</p>
+                    </div>
+                    <div className="panel-inset rounded-[18px] px-3 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Runs</p>
+                      <p className="mt-2 text-base font-semibold text-foreground">{sortedJobs.length}</p>
+                    </div>
+                  </div>
+
+                  <div className="panel-inset mt-3 rounded-[20px] px-4 py-3">
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Current source</p>
+                    <p className="mt-1 truncate text-sm font-medium text-foreground">{currentSourceFile?.name || "No source selected"}</p>
+                  </div>
+                </div>
+              </div>
+            }
+          />
         </div>
 
-        <MediaPreview file={focusedPreviewFile} previewStartSec={focusedPreviewStartSec} showHeader={false} showMetadata={false} />
+        <div className="min-w-0 xl:sticky xl:top-36 xl:h-[calc(100vh-10rem)] xl:overflow-y-auto">
+          <GeneratePanel
+            uploads={uploads}
+            presets={presets}
+            defaultPreset={currentPreset?.id || settings.default_preset}
+            defaultAggressiveness={settings.cut_aggressiveness}
+            defaultCaptions={settings.captions_enabled}
+            busy={jobBusy || uploadBusy}
+            onSubmit={async (payload) => {
+              await handleCreateJob(payload);
+            }}
+          />
+        </div>
       </section>
 
       <CandidateList
@@ -963,26 +1046,6 @@ export default function ProjectDetailPage() {
               <JobFeed jobs={sortedJobs} selectedJobId={selectedJobId} onSelectJob={handleSelectRunFromDialog} onCancel={(job) => handleCancelJob(job.id)} />
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
-        <DialogContent className="max-w-[780px] overflow-hidden p-0">
-          <GeneratePanel
-            className="rounded-none border-0 shadow-none"
-            uploads={uploads}
-            presets={presets}
-            defaultPreset={currentPreset?.id || settings.default_preset}
-            defaultAggressiveness={settings.cut_aggressiveness}
-            defaultCaptions={settings.captions_enabled}
-            busy={jobBusy || uploadBusy}
-            onSubmit={async (payload) => {
-              const created = await handleCreateJob(payload);
-              if (created) {
-                setGenerateDialogOpen(false);
-              }
-            }}
-          />
         </DialogContent>
       </Dialog>
 

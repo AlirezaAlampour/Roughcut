@@ -830,7 +830,7 @@ def render_rough_cut(
     final_video_label = video_label
     if has_video and subtitle_file_is_usable(captions_path):
         filter_parts.append(
-            f"{video_label}subtitles={captions_path.as_posix()}:force_style='FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF&,OutlineColour=&H003D3128&,BorderStyle=1,Outline=1,Shadow=0,MarginV=32'[vout]"
+            f"{video_label}subtitles={captions_path.as_posix()}:force_style='FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF&,OutlineColour=&H003D3128&,BackColour=&H80000000&,BorderStyle=3,Outline=1,Shadow=0,Alignment=2,MarginV=60'[vout]"
         )
         final_video_label = "[vout]"
 

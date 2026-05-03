@@ -23,8 +23,9 @@ export function UploadDropzone({
   onFilesSelected,
   compact = false
 }: UploadDropzoneProps) {
-  const [dragging, setDragging] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
 
   const helperText = useMemo(() => {
     if (uploadPhase === "processing") {
@@ -34,9 +35,9 @@ export function UploadDropzone({
       return `Uploading ${uploadProgress}%`;
     }
     if (compact) {
-      return "Drop a source here or pick files from your computer.";
+      return "Drag and drop your files here, or click to browse.";
     }
-    return "Drop one long-form video or audio source here, or choose a file from your computer.";
+    return "Drag and drop your files here, or click to browse for a long-form video or audio source.";
   }, [compact, uploadPhase, uploadProgress]);
 
   function emitFiles(fileList: FileList | null) {
@@ -46,34 +47,80 @@ export function UploadDropzone({
     onFilesSelected(Array.from(fileList));
   }
 
+  function resetDragState() {
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+  }
+
   return (
     <Card
       className={cn(
-        "border-dashed transition",
-        dragging ? "border-primary/50 bg-accent/30" : "border-border/80 bg-card/85",
-        disabled && "opacity-70"
+        "cursor-pointer border-2 border-dashed transition-colors duration-200 ease-in-out",
+        isDragActive
+          ? "border-[3px] border-primary bg-primary/5"
+          : "border-border/50 bg-zinc-50/50 dark:bg-zinc-900/50",
+        disabled && "cursor-not-allowed opacity-70"
       )}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      onClick={() => {
+        if (!disabled) {
+          inputRef.current?.click();
+        }
+      }}
+      onKeyDown={(event) => {
+        if (disabled) {
+          return;
+        }
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          inputRef.current?.click();
+        }
+      }}
+      onDragEnter={(event) => {
+        if (disabled) {
+          return;
+        }
+        event.preventDefault();
+        dragDepthRef.current += 1;
+        setIsDragActive(true);
+      }}
       onDragOver={(event) => {
         if (disabled) {
           return;
         }
         event.preventDefault();
-        setDragging(true);
+        setIsDragActive(true);
       }}
-      onDragLeave={() => setDragging(false)}
+      onDragLeave={(event) => {
+        if (disabled) {
+          return;
+        }
+        event.preventDefault();
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+        if (dragDepthRef.current === 0) {
+          setIsDragActive(false);
+        }
+      }}
       onDrop={(event) => {
         event.preventDefault();
-        setDragging(false);
+        resetDragState();
         emitFiles(event.dataTransfer.files);
       }}
     >
       <CardContent className={cn("flex flex-col items-center text-center", compact ? "gap-3 px-4 py-4" : "gap-4 px-6 py-8")}>
-        <div className={cn("flex items-center justify-center rounded-3xl bg-primary/10 text-primary", compact ? "size-11" : "size-14")}>
+        <div
+          className={cn(
+            "flex items-center justify-center rounded-3xl bg-primary/10 text-primary transition-colors duration-200 ease-in-out",
+            isDragActive && "bg-primary/15",
+            compact ? "size-11" : "size-14"
+          )}
+        >
           <CloudUpload className={cn(compact ? "size-5" : "size-6")} />
         </div>
         <div className={cn(compact ? "space-y-1" : "space-y-2")}>
           <h3 className={cn("font-medium tracking-tight text-foreground", compact ? "text-base" : "text-lg")}>
-            Upload long-form source
+            Upload source media
           </h3>
           <p className={cn("text-muted-foreground", compact ? "max-w-sm text-xs leading-5" : "max-w-md text-sm leading-6")}>
             {helperText}
@@ -91,8 +138,12 @@ export function UploadDropzone({
           type="button"
           variant="secondary"
           size={compact ? "sm" : "default"}
+          className="h-10"
           disabled={disabled}
-          onClick={() => inputRef.current?.click()}
+          onClick={(event) => {
+            event.stopPropagation();
+            inputRef.current?.click();
+          }}
         >
           <Plus className="mr-2 size-4" />
           Choose files
@@ -104,6 +155,7 @@ export function UploadDropzone({
           accept="video/*,audio/*"
           type="file"
           onChange={(event) => {
+            resetDragState();
             emitFiles(event.target.files);
             event.currentTarget.value = "";
           }}
