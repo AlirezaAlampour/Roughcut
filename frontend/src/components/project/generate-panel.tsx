@@ -37,6 +37,7 @@ export function GeneratePanel({
   const [presetId, setPresetId] = useState(defaultPreset || "");
   const [aggressiveness, setAggressiveness] = useState<Aggressiveness>(defaultAggressiveness);
   const [captionsEnabled, setCaptionsEnabled] = useState(defaultCaptions);
+  const [generateShorts, setGenerateShorts] = useState(true);
   const [userNotes, setUserNotes] = useState("");
 
   useEffect(() => {
@@ -135,6 +136,16 @@ export function GeneratePanel({
               <Switch checked={captionsEnabled} onCheckedChange={setCaptionsEnabled} />
             </div>
 
+            <div className="flex items-center justify-between gap-4 rounded-[18px] bg-muted/80 px-3.5 py-3">
+              <div>
+                <Label>Generate ranked shorts</Label>
+                <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                  Turn this off to run the planner without producing shorts candidates.
+                </p>
+              </div>
+              <Switch checked={generateShorts} onCheckedChange={setGenerateShorts} />
+            </div>
+
             <div className="space-y-2">
               <Label>Planner notes (optional)</Label>
               <Textarea
@@ -156,7 +167,7 @@ export function GeneratePanel({
               preset_id: presetId,
               aggressiveness,
               captions_enabled: captionsEnabled,
-              generate_shorts: true,
+              generate_shorts: generateShorts,
               user_notes: userNotes.trim() || undefined
             })
           }

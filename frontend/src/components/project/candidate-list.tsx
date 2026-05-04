@@ -331,16 +331,24 @@ export function CandidateList({
                     onMouseLeave={() => setHoveredCandidateId((current) => (current === candidate.id ? null : current))}
                   >
                     <div className="relative overflow-hidden rounded-[24px] border border-white/6 bg-black/60">
-                      <div className="aspect-[9/16]">
+                      <div className="relative aspect-[9/16] overflow-hidden">
                         <CandidatePreviewFrame
                           candidate={candidate}
                           previewUrl={previewUrl}
                           isVideo={hasVideoPreview}
                           active={Boolean(showPreview)}
                         />
+
+                        <div className="pointer-events-none absolute inset-x-0 top-6 z-10 flex w-full justify-center px-4">
+                          <div className="w-full max-w-[85%] rounded-xl bg-white/95 p-3 text-center shadow-lg backdrop-blur-md">
+                            <p className="text-sm font-semibold leading-snug text-neutral-900">
+                              {candidateTitle(candidate)}
+                            </p>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3.5">
+                      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 p-3.5">
                         <div className="rounded-full border border-white/10 bg-black/38 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-white/88">
                           #{index + 1}
                         </div>
@@ -359,7 +367,6 @@ export function CandidateList({
                             <span className="rounded-full border border-amber-300/25 bg-amber-300/12 px-2 py-0.5 text-amber-50">Exporting</span>
                           ) : null}
                         </div>
-                        <p className="mt-2 line-clamp-2 text-base font-semibold leading-6 text-white">{candidateTitle(candidate)}</p>
                       </div>
                     </div>
 
