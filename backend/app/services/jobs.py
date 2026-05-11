@@ -1010,6 +1010,9 @@ def _process_short_export_job(settings: Settings, job_id: str) -> None:
             hook_text_alignment=style_overrides.hook.text_alignment
             if style_overrides.hook and style_overrides.hook.text_alignment is not None
             else "center",
+            hook_background_style=style_overrides.hook.background_style
+            if style_overrides.hook and style_overrides.hook.background_style is not None
+            else "light",
             command_log_path=render_command_path,
         )
         _log_and_trace(

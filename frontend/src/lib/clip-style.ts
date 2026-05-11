@@ -66,7 +66,8 @@ function clipStylePresetConfig(preset: PresetConfig, candidate: CandidateClip, s
         boxWidth: estimateHookBoxWidth(baseHookText, fontSize, boxPadding),
         boxPadding,
         maxLines: 3,
-        textAlignment: "center"
+        textAlignment: "center",
+        backgroundStyle: "light"
       },
       captions: {
         ...baseColors,
@@ -96,7 +97,8 @@ function clipStylePresetConfig(preset: PresetConfig, candidate: CandidateClip, s
         boxWidth: estimateHookBoxWidth(baseHookText, fontSize, boxPadding),
         boxPadding,
         maxLines: 2,
-        textAlignment: "center"
+        textAlignment: "center",
+        backgroundStyle: "light"
       },
       captions: {
         ...baseColors,
@@ -126,7 +128,8 @@ function clipStylePresetConfig(preset: PresetConfig, candidate: CandidateClip, s
       boxWidth: estimateHookBoxWidth(baseHookText, cleanFontSize, cleanBoxPadding),
       boxPadding: cleanBoxPadding,
       maxLines: 3,
-      textAlignment: "center"
+      textAlignment: "center",
+      backgroundStyle: "light"
     },
     captions: {
       ...baseColors,
@@ -177,7 +180,8 @@ export function clipStyleDraftFromOverrides(
       boxWidth: styleOverrides?.hook?.box_width ?? defaults.hook.boxWidth,
       boxPadding: styleOverrides?.hook?.box_padding ?? defaults.hook.boxPadding,
       maxLines: styleOverrides?.hook?.max_lines ?? defaults.hook.maxLines,
-      textAlignment: styleOverrides?.hook?.text_alignment ?? defaults.hook.textAlignment
+      textAlignment: styleOverrides?.hook?.text_alignment ?? defaults.hook.textAlignment,
+      backgroundStyle: styleOverrides?.hook?.background_style ?? defaults.hook.backgroundStyle
     },
     captions: {
       baseColor: normalizeColor(styleOverrides?.captions?.base_color ?? defaults.captions.baseColor),
@@ -213,7 +217,8 @@ export function clipStyleDraftToOverrides(
       box_width: draft.hook.boxWidth,
       box_padding: draft.hook.boxPadding,
       max_lines: draft.hook.maxLines,
-      text_alignment: draft.hook.textAlignment
+      text_alignment: draft.hook.textAlignment,
+      background_style: draft.hook.backgroundStyle
     },
     captions: {
       base_color: normalizeColor(draft.captions.baseColor),

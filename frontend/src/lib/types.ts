@@ -87,6 +87,7 @@ export interface ProjectSummary {
 export type ClipStylePresetId = "clean" | "bold" | "aggressive";
 
 export type ClipHookTextAlignment = "left" | "center" | "right";
+export type ClipHookBackgroundStyle = "light" | "dark" | "transparent";
 
 export interface ClipHookStyleOverrides {
   hook_text?: string;
@@ -96,6 +97,7 @@ export interface ClipHookStyleOverrides {
   box_padding?: number;
   max_lines?: number;
   text_alignment?: ClipHookTextAlignment;
+  background_style?: ClipHookBackgroundStyle;
 }
 
 export interface ClipCaptionStyleOverrides {
@@ -204,6 +206,7 @@ export interface ClipStyleDraft {
     boxPadding: number;
     maxLines: number;
     textAlignment: ClipHookTextAlignment;
+    backgroundStyle: ClipHookBackgroundStyle;
   };
   captions: {
     baseColor: string;

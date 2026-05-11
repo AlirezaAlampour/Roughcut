@@ -41,6 +41,74 @@ export function FileList({
   contentClassName,
   listClassName
 }: FileListProps) {
+  const listContent =
+    files.length === 0 ? (
+      <div className="panel-inset min-h-[140px] rounded-[22px] px-4 py-6 text-sm leading-6 text-muted-foreground">
+        {emptyMessage}
+      </div>
+    ) : (
+      files.map((file, index) => (
+        <div key={file.id}>
+          <div
+            className={cn(
+              "flex cursor-pointer items-start justify-between gap-3 rounded-[22px] border border-transparent px-3.5 py-3.5 transition",
+              selectedFileId === file.id ? "border-primary/20 bg-primary/8" : "hover:bg-muted/80"
+            )}
+            onClick={() => onSelect(file)}
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">{file.name}</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {formatBytes(file.size_bytes)} · {file.media_type}
+                {file.duration_seconds ? ` · ${formatDuration(file.duration_seconds)}` : ""}
+              </p>
+              {file.width && file.height ? (
+                <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {file.width} × {file.height}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRename(file);
+                }}
+              >
+                <Pencil className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" asChild>
+                <a
+                  href={file.download_url}
+                  download
+                  onClick={(event) => event.stopPropagation()}
+                  aria-label={`Download ${file.name}`}
+                >
+                  <Download className="size-4" />
+                </a>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete(file);
+                }}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+          </div>
+          {index < files.length - 1 ? <Separator className="my-2" /> : null}
+        </div>
+      ))
+    );
+
   return (
     <Card className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
       <CardHeader className="pb-4">
@@ -54,74 +122,9 @@ export function FileList({
       </CardHeader>
       <CardContent className={cn("flex min-h-0 flex-1 flex-col gap-3", contentClassName)}>
         {lead ? <div className="shrink-0">{lead}</div> : null}
-        {files.length === 0 ? (
-          <div className="panel-inset min-h-[140px] rounded-[22px] px-4 py-6 text-sm leading-6 text-muted-foreground">
-            {emptyMessage}
-          </div>
-        ) : (
-          <div className={cn("pr-1", listClassName)}>
-            {files.map((file, index) => (
-              <div key={file.id}>
-                <div
-                  className={cn(
-                    "flex cursor-pointer items-start justify-between gap-3 rounded-[22px] border border-transparent px-3.5 py-3.5 transition",
-                    selectedFileId === file.id ? "border-primary/20 bg-primary/8" : "hover:bg-muted/80"
-                  )}
-                  onClick={() => onSelect(file)}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">{file.name}</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      {formatBytes(file.size_bytes)} · {file.media_type}
-                      {file.duration_seconds ? ` · ${formatDuration(file.duration_seconds)}` : ""}
-                    </p>
-                    {file.width && file.height ? (
-                      <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                        {file.width} × {file.height}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onRename(file);
-                      }}
-                    >
-                      <Pencil className="size-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-9 w-9" asChild>
-                      <a
-                        href={file.download_url}
-                        download
-                        onClick={(event) => event.stopPropagation()}
-                        aria-label={`Download ${file.name}`}
-                      >
-                        <Download className="size-4" />
-                      </a>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDelete(file);
-                      }}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                </div>
-                {index < files.length - 1 ? <Separator className="my-2" /> : null}
-              </div>
-            ))}
-          </div>
-        )}
+        <div className={cn("max-h-[400px] overflow-y-auto pr-2 space-y-3 custom-scrollbar", listClassName)}>
+          {listContent}
+        </div>
       </CardContent>
     </Card>
   );

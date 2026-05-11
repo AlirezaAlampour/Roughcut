@@ -138,6 +138,16 @@ function candidateLabel(candidate: CandidateClip) {
   return candidate.title.trim() || candidate.hook_text.trim() || "Selected clip";
 }
 
+function hookPreviewBoxClass(backgroundStyle: ClipStyleDraft["hook"]["backgroundStyle"]) {
+  if (backgroundStyle === "dark") {
+    return "bg-black/82 text-white shadow-[0_18px_52px_-36px_rgba(0,0,0,0.72)]";
+  }
+  if (backgroundStyle === "transparent") {
+    return "bg-transparent text-white shadow-none";
+  }
+  return "bg-white/97 text-[#101010] shadow-[0_18px_52px_-36px_rgba(0,0,0,0.48)]";
+}
+
 function RangeField({
   label,
   value,
@@ -409,7 +419,10 @@ export function ClipStyleEditor({
                       )}
 
                       <div
-                        className="absolute left-1/2 z-10 -translate-x-1/2 rounded-[20px] bg-white/97 text-[#101010] shadow-[0_18px_52px_-36px_rgba(0,0,0,0.48)]"
+                        className={cn(
+                          "absolute left-1/2 z-10 -translate-x-1/2 rounded-[20px]",
+                          hookPreviewBoxClass(draft.hook.backgroundStyle)
+                        )}
                         style={{
                           top: `${(draft.hook.topOffset / 1920) * 100}%`,
                           width: `${clamp((draft.hook.boxWidth / 1080) * 100, 40, 88)}%`,
@@ -607,7 +620,7 @@ export function ClipStyleEditor({
                             setDraft((current) => (current ? { ...current, hook: { ...current.hook, maxLines: Number(value) } } : current))
                           }
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="h-10">
                             <SelectValue placeholder="Select max lines" />
                           </SelectTrigger>
                           <SelectContent>
@@ -615,6 +628,50 @@ export function ClipStyleEditor({
                             <SelectItem value="2">2 lines</SelectItem>
                             <SelectItem value="3">3 lines</SelectItem>
                             <SelectItem value="4">4 lines</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Text alignment</Label>
+                        <Select
+                          value={draft.hook.textAlignment}
+                          onValueChange={(value) =>
+                            setDraft((current) =>
+                              current
+                                ? { ...current, hook: { ...current.hook, textAlignment: value as ClipStyleDraft["hook"]["textAlignment"] } }
+                                : current
+                            )
+                          }
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue placeholder="Select alignment" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="left">Left</SelectItem>
+                            <SelectItem value="center">Center</SelectItem>
+                            <SelectItem value="right">Right</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Background color</Label>
+                        <Select
+                          value={draft.hook.backgroundStyle}
+                          onValueChange={(value) =>
+                            setDraft((current) =>
+                              current
+                                ? { ...current, hook: { ...current.hook, backgroundStyle: value as ClipStyleDraft["hook"]["backgroundStyle"] } }
+                                : current
+                            )
+                          }
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue placeholder="Select background style" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="light">White (Light)</SelectItem>
+                            <SelectItem value="dark">Black (Dark)</SelectItem>
+                            <SelectItem value="transparent">Transparent</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -810,28 +867,6 @@ export function ClipStyleEditor({
                         setDraft((current) => (current ? { ...current, hook: { ...current.hook, boxPadding: value } } : current))
                       }
                     />
-                    <div className="space-y-2">
-                      <Label>Hook alignment</Label>
-                      <Select
-                        value={draft.hook.textAlignment}
-                        onValueChange={(value) =>
-                          setDraft((current) =>
-                            current
-                              ? { ...current, hook: { ...current.hook, textAlignment: value as ClipStyleDraft["hook"]["textAlignment"] } }
-                              : current
-                          )
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select alignment" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="left">Left</SelectItem>
-                          <SelectItem value="center">Center</SelectItem>
-                          <SelectItem value="right">Right</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
                     <RangeField
                       label="Caption bottom offset"
                       value={draft.captions.bottomOffset}

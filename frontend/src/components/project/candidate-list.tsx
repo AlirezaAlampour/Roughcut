@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatDuration, formatTimestamp } from "@/lib/format";
-import type { CandidateClip, FileItem, JobSummary } from "@/lib/types";
+import type { CandidateClip, ClipHookStyleOverrides, ClipStyleOverrides, FileItem, JobSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface CandidateListProps {
@@ -24,6 +24,8 @@ interface CandidateListProps {
   onOpenDetails?: (job: JobSummary, candidate: CandidateClip) => void;
   onEditCandidate?: (job: JobSummary, candidate: CandidateClip) => void;
   editedCandidateIds?: Set<string>;
+  candidateStyleById?: Record<string, ClipStyleOverrides | undefined>;
+  projectDefaultStyle?: ClipStyleOverrides | null;
   className?: string;
 }
 
@@ -56,6 +58,38 @@ function candidateHook(candidate: CandidateClip) {
 
 function candidateSummary(candidate: CandidateClip) {
   return candidate.rationale.trim() || candidate.transcript_excerpt.trim() || candidate.hook_text.trim() || "Candidate summary unavailable.";
+}
+
+function resolvedHookStyle(
+  candidate: CandidateClip,
+  candidateStyleById: Record<string, ClipStyleOverrides | undefined>,
+  projectDefaultStyle?: ClipStyleOverrides | null
+): ClipHookStyleOverrides {
+  return candidateStyleById[candidate.id]?.hook || projectDefaultStyle?.hook || {};
+}
+
+function hookOverlayTitle(candidate: CandidateClip, hookStyle: ClipHookStyleOverrides) {
+  return hookStyle.hook_text?.trim() || candidateTitle(candidate);
+}
+
+function hookOverlayAlignmentClass(alignment: ClipHookStyleOverrides["text_alignment"]) {
+  if (alignment === "left") {
+    return "text-left";
+  }
+  if (alignment === "right") {
+    return "text-right";
+  }
+  return "text-center";
+}
+
+function hookOverlaySurfaceClass(backgroundStyle: ClipHookStyleOverrides["background_style"]) {
+  if (backgroundStyle === "dark") {
+    return "bg-black/80 text-white";
+  }
+  if (backgroundStyle === "transparent") {
+    return "bg-transparent text-white shadow-none backdrop-blur-none";
+  }
+  return "bg-white/95 text-neutral-900";
 }
 
 function matchesQuery(candidate: CandidateClip, query: string) {
@@ -174,6 +208,8 @@ export function CandidateList({
   onOpenDetails,
   onEditCandidate,
   editedCandidateIds,
+  candidateStyleById = {},
+  projectDefaultStyle,
   className
 }: CandidateListProps) {
   const [query, setQuery] = useState("");
@@ -308,6 +344,7 @@ export function CandidateList({
                 const edited = editedCandidateIds?.has(candidate.id) ?? false;
                 const showPreview = hasVideoPreview && previewUrl && (selected || hoveredCandidateId === candidate.id);
                 const duration = candidate.end_sec - candidate.start_sec;
+                const hookStyle = resolvedHookStyle(candidate, candidateStyleById, projectDefaultStyle);
 
                 return (
                   <div
@@ -340,9 +377,15 @@ export function CandidateList({
                         />
 
                         <div className="pointer-events-none absolute inset-x-0 top-6 z-10 flex w-full justify-center px-4">
-                          <div className="w-full max-w-[85%] rounded-xl bg-white/95 p-3 text-center shadow-lg backdrop-blur-md">
-                            <p className="text-sm font-semibold leading-snug text-neutral-900">
-                              {candidateTitle(candidate)}
+                          <div
+                            className={cn(
+                              "w-full max-w-[85%] rounded-xl p-3 shadow-lg backdrop-blur-md",
+                              hookOverlayAlignmentClass(hookStyle.text_alignment),
+                              hookOverlaySurfaceClass(hookStyle.background_style)
+                            )}
+                          >
+                            <p className="text-sm font-semibold leading-snug">
+                              {hookOverlayTitle(candidate, hookStyle)}
                             </p>
                           </div>
                         </div>

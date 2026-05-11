@@ -514,6 +514,7 @@ def _hook_overlay_filter_chain(
     box_width: int | None,
     box_padding: int,
     text_alignment: str,
+    background_style: str,
 ) -> tuple[list[str], str]:
     if not hook_lines or hook_text_path is None:
         return [], video_input
@@ -533,22 +534,35 @@ def _hook_overlay_filter_chain(
     box_top = min(max(safe_top_margin, int(top_offset or 132)), max(safe_top_margin, 1920 - box_height - safe_bottom_margin))
     box_left = f"(w-{resolved_box_width})/2"
     text_x = "(w-text_w)/2"
+    resolved_background_style = background_style if background_style in {"light", "dark", "transparent"} else "light"
     if text_alignment == "left":
         text_x = f"{box_left}+{box_padding}"
     elif text_alignment == "right":
         text_x = f"{box_left}+{resolved_box_width}-text_w-{box_padding}"
 
+    box_color = "white@0.97"
+    font_color = "0x101010"
+    shadow_color = "black@0.06"
+    if resolved_background_style == "dark":
+        box_color = "black@0.80"
+        font_color = "white"
+        shadow_color = "black@0.22"
+    elif resolved_background_style == "transparent":
+        box_color = "black@0.0"
+        font_color = "white"
+        shadow_color = "black@0.40"
+
     filters = [
-        f"{video_input}drawbox=x={box_left}:y={box_top}:w={resolved_box_width}:h={box_height}:color=white@0.97:t=fill[hookbox0]"
+        f"{video_input}drawbox=x={box_left}:y={box_top}:w={resolved_box_width}:h={box_height}:color={box_color}:t=fill[hookbox0]"
     ]
 
     filters.append(
         "[hookbox0]drawtext="
         f"textfile={_escape_filter_value(hook_text_path.as_posix())}:"
         "reload=0:fix_bounds=1:text_shaping=1:"
-        "font=Sans:fontcolor=0x101010:"
+        f"font=Sans:fontcolor={font_color}:"
         f"fontsize={font_size}:"
-        f"line_spacing={line_gap}:borderw=0:shadowx=0:shadowy=1:shadowcolor=black@0.06:"
+        f"line_spacing={line_gap}:borderw=0:shadowx=0:shadowy=1:shadowcolor={shadow_color}:"
         f"x={text_x}:y={box_top}+({box_height}-text_h)/2[hookbox1]"
     )
 
@@ -638,6 +652,7 @@ def render_short_clip(
     hook_box_padding: int = 36,
     hook_max_lines: int = 3,
     hook_text_alignment: str = "center",
+    hook_background_style: str = "light",
     command_log_path: Path | None = None,
 ) -> None:
     if end_sec <= start_sec:
@@ -712,6 +727,7 @@ def render_short_clip(
                 box_width=hook_box_width,
                 box_padding=hook_box_padding,
                 text_alignment=hook_text_alignment,
+                background_style=hook_background_style,
             )
             filter_parts.extend(hook_filters)
 

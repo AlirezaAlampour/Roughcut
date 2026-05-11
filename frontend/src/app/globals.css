@@ -140,4 +140,17 @@
     background-color: hsl(var(--code-background));
     color: hsl(var(--code-foreground));
   }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 9px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }

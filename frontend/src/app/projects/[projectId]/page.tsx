@@ -643,6 +643,15 @@ export default function ProjectDetailPage() {
             .filter((item): item is { id: string; label: string; styleOverrides: ClipStyleOverrides } => Boolean(item))
         ]
       : [];
+  const candidateStyleById =
+    candidateReviewJob
+      ? Object.fromEntries(
+          (candidateReviewJob.result?.candidates || []).map((candidate) => [
+            candidate.id,
+            clipStyleMap.get(clipStyleKey(candidateReviewJob.id, candidate.id))
+          ])
+        )
+      : {};
   const currentSourceFile = (selectedFile?.kind === "upload" ? selectedFile : null) || candidateSourceFile || uploads[0] || null;
   const currentPresetId = candidateReviewJob?.preset_id ?? selectedJob?.preset_id ?? settings.default_preset;
   const currentPreset =
@@ -930,6 +939,8 @@ export default function ProjectDetailPage() {
         onOpenDetails={handleOpenCandidateDetails}
         onEditCandidate={handleOpenCandidateEditor}
         editedCandidateIds={editedCandidateIds}
+        candidateStyleById={candidateStyleById}
+        projectDefaultStyle={project.clip_style_defaults}
       />
 
       <ClipStyleEditor

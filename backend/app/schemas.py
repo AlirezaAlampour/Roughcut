@@ -363,6 +363,7 @@ class ClipHookStyleOverrides(BaseModel):
     box_padding: int | None = Field(default=None, ge=12, le=96)
     max_lines: int | None = Field(default=None, ge=1, le=4)
     text_alignment: Literal["left", "center", "right"] | None = None
+    background_style: Literal["light", "dark", "transparent"] | None = None
 
     @field_validator("hook_text")
     @classmethod
