@@ -1,10 +1,11 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Download, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { formatBytes, formatDuration } from "@/lib/format";
 import type { FileItem } from "@/lib/types";
@@ -24,6 +25,21 @@ interface FileListProps {
   className?: string;
   contentClassName?: string;
   listClassName?: string;
+  enableBulkActions?: boolean;
+  onDeleteSelected?: (files: FileItem[]) => Promise<void> | void;
+  onRenderSelected?: (files: FileItem[]) => Promise<void> | void;
+}
+
+function triggerDownloads(files: FileItem[]) {
+  for (const file of files) {
+    const link = document.createElement("a");
+    link.href = file.download_url;
+    link.download = file.name;
+    link.rel = "noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
 }
 
 export function FileList({
@@ -39,8 +55,61 @@ export function FileList({
   lead,
   className,
   contentClassName,
-  listClassName
+  listClassName,
+  enableBulkActions = false,
+  onDeleteSelected,
+  onRenderSelected
 }: FileListProps) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkRendering, setBulkRendering] = useState(false);
+
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => files.some((file) => file.id === id)));
+  }, [files]);
+
+  const selectedFiles = useMemo(
+    () => files.filter((file) => selectedIds.includes(file.id)),
+    [files, selectedIds]
+  );
+  const allSelected = files.length > 0 && selectedIds.length === files.length;
+  const someSelected = selectedIds.length > 0 && !allSelected;
+
+  function toggleSelected(fileId: string, checked: boolean) {
+    setSelectedIds((current) =>
+      checked ? Array.from(new Set([...current, fileId])) : current.filter((id) => id !== fileId)
+    );
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setSelectedIds(checked ? files.map((file) => file.id) : []);
+  }
+
+  async function handleDeleteSelected() {
+    if (!onDeleteSelected || selectedFiles.length === 0) {
+      return;
+    }
+    try {
+      setBulkDeleting(true);
+      await onDeleteSelected(selectedFiles);
+      setSelectedIds([]);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  async function handleRenderSelected() {
+    if (!onRenderSelected || selectedFiles.length === 0) {
+      return;
+    }
+    try {
+      setBulkRendering(true);
+      await onRenderSelected(selectedFiles);
+    } finally {
+      setBulkRendering(false);
+    }
+  }
+
   const listContent =
     files.length === 0 ? (
       <div className="panel-inset min-h-[140px] rounded-[22px] px-4 py-6 text-sm leading-6 text-muted-foreground">
@@ -51,57 +120,72 @@ export function FileList({
         <div key={file.id}>
           <div
             className={cn(
-              "flex cursor-pointer items-start justify-between gap-3 rounded-[22px] border border-transparent px-3.5 py-3.5 transition",
+              "flex cursor-pointer items-start gap-3 rounded-[22px] border border-transparent px-3.5 py-3.5 transition",
               selectedFileId === file.id ? "border-primary/20 bg-primary/8" : "hover:bg-muted/80"
             )}
             onClick={() => onSelect(file)}
           >
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-foreground">{file.name}</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                {formatBytes(file.size_bytes)} · {file.media_type}
-                {file.duration_seconds ? ` · ${formatDuration(file.duration_seconds)}` : ""}
-              </p>
-              {file.width && file.height ? (
-                <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                  {file.width} × {file.height}
-                </p>
-              ) : null}
-            </div>
+            {enableBulkActions ? (
+              <div
+                className="flex shrink-0 pt-0.5"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <Checkbox
+                  aria-label={`Select ${file.name}`}
+                  checked={selectedIds.includes(file.id)}
+                  onCheckedChange={(checked) => toggleSelected(file.id, checked)}
+                />
+              </div>
+            ) : null}
 
-            <div className="flex shrink-0 items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onRename(file);
-                }}
-              >
-                <Pencil className="size-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9" asChild>
-                <a
-                  href={file.download_url}
-                  download
-                  onClick={(event) => event.stopPropagation()}
-                  aria-label={`Download ${file.name}`}
+            <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{file.name}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {formatBytes(file.size_bytes)} · {file.media_type}
+                  {file.duration_seconds ? ` · ${formatDuration(file.duration_seconds)}` : ""}
+                </p>
+                {file.width && file.height ? (
+                  <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                    {file.width} × {file.height}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRename(file);
+                  }}
                 >
-                  <Download className="size-4" />
-                </a>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDelete(file);
-                }}
-              >
-                <Trash2 className="size-4" />
-              </Button>
+                  <Pencil className="size-4" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-9 w-9" asChild>
+                  <a
+                    href={file.download_url}
+                    download
+                    onClick={(event) => event.stopPropagation()}
+                    aria-label={`Download ${file.name}`}
+                  >
+                    <Download className="size-4" />
+                  </a>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDelete(file);
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
             </div>
           </div>
           {index < files.length - 1 ? <Separator className="my-2" /> : null}
@@ -122,6 +206,55 @@ export function FileList({
       </CardHeader>
       <CardContent className={cn("flex min-h-0 flex-1 flex-col gap-3", contentClassName)}>
         {lead ? <div className="shrink-0">{lead}</div> : null}
+        {enableBulkActions && files.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-border/70 bg-background/60 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                aria-label="Select all files"
+                checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                onCheckedChange={toggleSelectAll}
+              />
+              <span className="text-sm font-medium text-foreground">Select All</span>
+              {selectedFiles.length > 0 ? (
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  {selectedFiles.length} selected
+                </span>
+              ) : null}
+            </div>
+
+            {selectedFiles.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {onRenderSelected ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={bulkDeleting || bulkRendering}
+                    onClick={() => void handleRenderSelected()}
+                  >
+                    {bulkRendering ? "Starting..." : "Render Selected"}
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={bulkDeleting || bulkRendering}
+                  onClick={() => triggerDownloads(selectedFiles)}
+                >
+                  Download Selected
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={bulkDeleting || bulkRendering}
+                  onClick={() => void handleDeleteSelected()}
+                >
+                  {bulkDeleting ? "Deleting..." : "Delete Selected"}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div className={cn("max-h-[400px] overflow-y-auto pr-2 space-y-3 custom-scrollbar", listClassName)}>
           {listContent}
         </div>

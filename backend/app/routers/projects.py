@@ -240,10 +240,22 @@ def create_job(
         raise HTTPException(status_code=400, detail="Unknown preset.")
 
     effective_settings = repository.get_effective_settings(conn, config)
-    if not effective_settings["llm_base_url"] or not effective_settings["llm_model"]:
+    if payload.generate_shorts and (not effective_settings["llm_base_url"] or not effective_settings["llm_model"]):
         raise HTTPException(
             status_code=400,
             detail="Set the local LLM base URL and planner model in Settings before generating.",
+        )
+
+    job_payload = {
+        "output_quality_preset": effective_settings["output_quality_preset"],
+        "preset": preset.model_dump(),
+    }
+    if payload.generate_shorts:
+        job_payload.update(
+            {
+                "llm_base_url": effective_settings["llm_base_url"],
+                "llm_model": effective_settings["llm_model"],
+            }
         )
 
     job = repository.create_job(
@@ -253,14 +265,9 @@ def create_job(
         preset_id=payload.preset_id,
         aggressiveness=payload.aggressiveness,
         captions_enabled=payload.captions_enabled,
-        generate_shorts=True,
+        generate_shorts=payload.generate_shorts,
         user_notes=payload.user_notes,
-        payload={
-            "llm_base_url": effective_settings["llm_base_url"],
-            "llm_model": effective_settings["llm_model"],
-            "output_quality_preset": effective_settings["output_quality_preset"],
-            "preset": preset.model_dump(),
-        },
+        payload=job_payload,
         kind="shorts_candidate_generation",
     )
     storage.sync_project_manifest(conn, config, project_id)
@@ -289,6 +296,7 @@ def export_candidate(
     candidate = next((item for item in result.candidates if item.id == candidate_id), None)
     if candidate is None:
         raise HTTPException(status_code=404, detail="Candidate not found.")
+    export_candidate = candidate.model_copy(update={"subtitle_segments": payload.subtitle_segments}) if payload.subtitle_segments else candidate
 
     source_file = repository.get_file(conn, project_id, candidate_job["source_file_id"])
     if source_file is None:
@@ -323,8 +331,8 @@ def export_candidate(
         user_notes=None,
         payload={
             "source_candidate_job_id": job_id,
-            "candidate_id": candidate.id,
-            "candidate": candidate.model_dump(),
+            "candidate_id": export_candidate.id,
+            "candidate": export_candidate.model_dump(),
             "captions_enabled": bool(captions_enabled),
             "output_quality_preset": effective_settings["output_quality_preset"],
             "export_mode": preset.export_mode,
