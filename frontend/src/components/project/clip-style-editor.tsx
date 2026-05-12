@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
+import { ArrowLeft, Pencil, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 
 import {
   applyStylePresetToDraft,
@@ -25,14 +25,6 @@ import type {
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -59,6 +51,7 @@ interface ClipStyleEditorProps {
   isQuickCaptionMode?: boolean;
   onSaveClipStyle: (overrides: ClipStyleOverrides | undefined, options?: { notify?: boolean }) => Promise<void> | void;
   onSaveProjectDefault: (overrides: ClipStyleOverrides | undefined, options?: { notify?: boolean }) => Promise<void> | void;
+  onRenameSourceFile?: (newName: string) => Promise<void> | void;
   onRender: (overrides: ClipStyleOverrides | undefined, subtitleSegments?: SubtitleSegment[]) => Promise<void> | void;
 }
 
@@ -242,6 +235,19 @@ function draftForQuickCaptionMode(draft: ClipStyleDraft): ClipStyleDraft {
   };
 }
 
+function wordEditKey(segmentIndex: number, wordIndex: number) {
+  return `${segmentIndex}:${wordIndex}`;
+}
+
+function stripFileExtension(fileName: string) {
+  return fileName.replace(/\.[^/.]+$/, "");
+}
+
+function fileExtension(fileName: string) {
+  const match = fileName.match(/(\.[^/.]+)$/);
+  return match?.[1] || ".mp4";
+}
+
 function RangeField({
   label,
   value,
@@ -295,21 +301,31 @@ export function ClipStyleEditor({
   isQuickCaptionMode = false,
   onSaveClipStyle,
   onSaveProjectDefault,
+  onRenameSourceFile,
   onRender
 }: ClipStyleEditorProps) {
   const [draft, setDraft] = useState<ClipStyleDraft | null>(null);
   const [editableCandidate, setEditableCandidate] = useState<CandidateClip | null>(null);
+  const [activeTab, setActiveTab] = useState("design");
+  const [editingWordIndex, setEditingWordIndex] = useState<string | null>(null);
+  const [editingWordValue, setEditingWordValue] = useState("");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitleValue, setEditTitleValue] = useState("");
   const [playheadSec, setPlayheadSec] = useState(0);
   const [previewNonce, setPreviewNonce] = useState(0);
   const [rendering, setRendering] = useState(false);
   const [savingClip, setSavingClip] = useState(false);
   const [savingProjectDefault, setSavingProjectDefault] = useState(false);
+  const [renamingTitle, setRenamingTitle] = useState(false);
   const [copySelection, setCopySelection] = useState("__none__");
   const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
   const foregroundVideoRef = useRef<HTMLVideoElement | null>(null);
+  const titleCommitInFlightRef = useRef(false);
 
   const sourceUrl = sourceFile?.preview_url || sourceFile?.download_url || null;
   const sourceIsVideo = Boolean(sourceFile?.mime_type?.startsWith("video/"));
+  const sourceFileBaseName = sourceFile ? stripFileExtension(sourceFile.name) : "";
+  const sourceFileExtension = sourceFile ? fileExtension(sourceFile.name) : ".mp4";
   const candidateDuration = candidate ? Math.max(1.6, candidate.end_sec - candidate.start_sec) : 0;
   const previewEndSec = candidate ? Math.min(candidate.end_sec, candidate.start_sec + Math.min(candidateDuration, 4.4)) : 0;
   const styleCandidate = candidate ?? PROJECT_DEFAULT_PREVIEW_CANDIDATE;
@@ -324,12 +340,19 @@ export function ClipStyleEditor({
       ...styleCandidate,
       subtitle_segments: styleCandidate.subtitle_segments.map((segment) => ({
         ...segment,
-        words: segment.words.map((word) => ({ ...word }))
+        words: (segment.words.length ? segment.words : derivedWordsForEditedSegment(segment, segment.text)).map((word) => ({
+          ...word
+        }))
       }))
     });
+    setActiveTab(styleCandidate.subtitle_segments.length ? "transcript" : "design");
+    setEditingWordIndex(null);
+    setEditingWordValue("");
+    setIsEditingTitle(false);
+    setEditTitleValue(sourceFile ? stripFileExtension(sourceFile.name) : "");
     setPlayheadSec(0);
     setPreviewNonce((current) => current + 1);
-  }, [activeOverrides, open, preset, styleCandidate]);
+  }, [activeOverrides, open, preset, sourceFile, styleCandidate]);
 
   useEffect(() => {
     if (!open || !candidate || !sourceIsVideo || !sourceUrl) {
@@ -402,16 +425,26 @@ export function ClipStyleEditor({
     };
   }, [candidate?.id, candidate?.start_sec, open, previewEndSec, previewNonce, sourceIsVideo, sourceUrl]);
 
+  if (!open) {
+    return null;
+  }
+
   if (!preset || !draft || !editableCandidate) {
     return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-[680px]">
-          <DialogHeader>
-            <DialogTitle>Edit style</DialogTitle>
-            <DialogDescription>Style controls will appear once Roughcut has loaded the active preset.</DialogDescription>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
+      <div className="fixed inset-0 z-50 flex bg-background">
+        <div className="relative flex h-full w-full items-center justify-center bg-background px-6">
+          <Button type="button" variant="secondary" className="absolute left-4 top-4" onClick={() => onOpenChange(false)}>
+            <ArrowLeft className="mr-2 size-4" />
+            Back to Project
+          </Button>
+          <div className="max-w-md text-center">
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground">Loading style editor</h2>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              Style controls will appear once Roughcut has loaded the active preset.
+            </p>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -477,7 +510,46 @@ export function ClipStyleEditor({
     }
   }
 
-  function handleSubtitleSegmentChange(segmentIndex: number, text: string) {
+  async function handleTitleCommit() {
+    if (!sourceFile || !onRenameSourceFile) {
+      setIsEditingTitle(false);
+      return;
+    }
+
+    if (titleCommitInFlightRef.current) {
+      return;
+    }
+
+    const nextBaseName = editTitleValue.trim();
+    if (!nextBaseName || nextBaseName === sourceFileBaseName) {
+      setEditTitleValue(sourceFileBaseName);
+      setIsEditingTitle(false);
+      return;
+    }
+
+    titleCommitInFlightRef.current = true;
+
+    try {
+      setRenamingTitle(true);
+      await onRenameSourceFile(`${nextBaseName}${sourceFileExtension}`);
+    } finally {
+      titleCommitInFlightRef.current = false;
+      setRenamingTitle(false);
+      setIsEditingTitle(false);
+    }
+  }
+
+  function handleWordEditStart(segmentIndex: number, wordIndex: number, word: string) {
+    setEditingWordIndex(wordEditKey(segmentIndex, wordIndex));
+    setEditingWordValue(word);
+  }
+
+  function handleWordEditCancel() {
+    setEditingWordIndex(null);
+    setEditingWordValue("");
+  }
+
+  function handleWordEditCommit(segmentIndex: number, wordIndex: number) {
     setEditableCandidate((current) =>
       current
         ? {
@@ -486,224 +558,288 @@ export function ClipStyleEditor({
               index === segmentIndex
                 ? {
                     ...segment,
-                    text,
-                    words: derivedWordsForEditedSegment(segment, text)
+                    words: segment.words.map((word, currentWordIndex) =>
+                      currentWordIndex === wordIndex
+                        ? {
+                            ...word,
+                            word: editingWordValue.trim() || word.word
+                          }
+                        : word
+                    ),
+                    text: segment.words
+                      .map((word, currentWordIndex) =>
+                        currentWordIndex === wordIndex ? editingWordValue.trim() || word.word : word.word
+                      )
+                      .join(" ")
                   }
                 : segment
             )
           }
         : current
     );
+    handleWordEditCancel();
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[calc(100vh-2.5rem)] w-[min(96vw,1320px)] max-w-none overflow-hidden p-0">
-        <div className="flex h-full flex-col">
-          <DialogHeader className="border-b border-border/70 px-6 py-5 pr-14">
-            <div className="flex flex-wrap items-center gap-2">
-              <DialogTitle>{editingProjectDefaultOnly ? "Edit project default style" : "Edit clip"}</DialogTitle>
-              <Badge variant="muted">{candidateLabel(previewCandidate)}</Badge>
-              <Badge variant={hasClipSpecificStyle ? "success" : "muted"}>
-                {editingProjectDefaultOnly
-                  ? activeOverrides
-                    ? "Project default"
-                    : "Unsaved project default"
-                  : hasClipSpecificStyle
-                    ? "Clip-specific style"
-                    : activeOverrides
-                      ? "Using project default"
-                      : "Not saved yet"}
-              </Badge>
-              {hasUnsavedChanges ? <Badge variant="warning">Unsaved</Badge> : null}
-            </div>
-            <DialogDescription>
-              {editingProjectDefaultOnly
-                ? "Tune the shared caption look once, save it as the project default, then batch render completed clips."
-                : "Pick a built-in style, fine-tune only the high-leverage controls, then save or re-render. Final export still uses deterministic ffmpeg settings."}
-            </DialogDescription>
-          </DialogHeader>
+    <div className="fixed inset-0 z-50 flex bg-background">
+      <div className="grid h-full w-full grid-cols-1 lg:grid-cols-[minmax(0,1fr)_480px]">
+        <div className="relative flex min-h-[42vh] items-center justify-center overflow-hidden bg-[#050505] px-6 py-8 lg:sticky lg:top-0 lg:h-screen">
+          <Button type="button" variant="secondary" className="absolute left-4 top-4 z-20" onClick={() => onOpenChange(false)}>
+            <ArrowLeft className="mr-2 size-4" />
+            Back to Project
+          </Button>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,460px)_minmax(0,1fr)]">
-              <div className="space-y-4">
-                <div className="rounded-[30px] border border-border/70 bg-card/72 p-4 shadow-soft">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="panel-label">Live Preview</p>
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        {isQuickCaptionMode
-                          ? "Approximate browser preview of the caption timing and type treatment."
-                          : "Approximate browser preview of the hook banner, center blur fill, and captions."}
-                      </p>
-                    </div>
-                    <Button type="button" variant="secondary" size="sm" onClick={() => setPreviewNonce((current) => current + 1)}>
-                      Preview
-                    </Button>
-                  </div>
+          <div className="w-full max-w-[560px]">
+            <div className="rounded-[32px] border border-white/8 bg-black/50 p-4 shadow-[0_40px_120px_-48px_rgba(0,0,0,0.9)]">
+              <div className="flex items-center justify-between gap-3 text-white/80">
+                <div>
+                  <p className="panel-label text-white/50">Live Preview</p>
+                  <p className="mt-2 text-sm leading-6 text-white/70">
+                    {isQuickCaptionMode
+                      ? "Approximate browser preview of the caption timing and type treatment."
+                      : "Approximate browser preview of the hook banner, center blur fill, and captions."}
+                  </p>
+                </div>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setPreviewNonce((current) => current + 1)}>
+                  Preview
+                </Button>
+              </div>
 
-                  <div className="mt-4 overflow-hidden rounded-[30px] border border-border/70 bg-black">
-                    <div className="relative aspect-[9/16]">
-                      {sourceIsVideo && sourceUrl ? (
-                        <>
-                          <video
-                            ref={backgroundVideoRef}
-                            key={`bg-${sourceFile?.id}-${styleCandidate.id}-${previewNonce}`}
-                            muted
-                            playsInline
-                            preload="metadata"
-                            className={cn(
-                              "absolute inset-0 h-full w-full",
-                              isQuickCaptionMode ? "object-contain" : "scale-110 object-cover"
-                            )}
-                            style={{
-                              filter: isQuickCaptionMode
-                                ? "none"
-                                : `blur(${8 + previewComposition.blurIntensity * 0.42}px) brightness(0.82) saturate(0.88)`
-                            }}
-                            src={sourceUrl}
-                          />
-                          {!isQuickCaptionMode ? (
-                            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,6,5,0.12),rgba(7,6,5,0.32))]" />
-                          ) : null}
-                          <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
-                            <video
-                              ref={foregroundVideoRef}
-                              key={`fg-${sourceFile?.id}-${styleCandidate.id}-${previewNonce}`}
-                              muted
-                              playsInline
-                              controls
-                              preload="metadata"
-                              className="h-full w-full object-contain"
-                              style={{
-                                transform: `translateY(${previewComposition.foregroundVerticalOffset * 0.18}px) scale(${previewComposition.foregroundScale})`
-                              }}
-                              src={sourceUrl}
-                            />
-                          </div>
-                        </>
-                      ) : (
-                        <div
-                          className={cn(
-                            "absolute inset-0",
-                            editingProjectDefaultOnly
-                              ? "bg-black"
-                              : "bg-[radial-gradient(circle_at_top,rgba(206,188,155,0.24),transparent_32%),linear-gradient(180deg,rgba(11,10,9,0.58),rgba(11,10,9,0.92))]"
-                          )}
-                        />
-                      )}
-
-                      {!isQuickCaptionMode ? (
-                        <div
-                          className={cn(
-                            "absolute left-1/2 z-10 -translate-x-1/2 rounded-[20px]",
-                            hookPreviewBoxClass(draft.hook.backgroundStyle)
-                          )}
-                          style={{
-                            top: `${(draft.hook.topOffset / 1920) * 100}%`,
-                            width: `${clamp((draft.hook.boxWidth / 1080) * 100, 40, 88)}%`,
-                            padding: `${draft.hook.boxPadding * 0.28}px ${draft.hook.boxPadding * 0.34}px`
-                          }}
-                        >
-                          <p
-                            className="whitespace-pre-wrap break-words font-semibold leading-[1.12]"
-                            style={{
-                              fontSize: `${draft.hook.fontSize * 0.34}px`,
-                              textAlign: draft.hook.textAlignment,
-                              display: "-webkit-box",
-                              WebkitBoxOrient: "vertical",
-                              WebkitLineClamp: draft.hook.maxLines,
-                              overflow: "hidden"
-                            }}
-                          >
-                            {previewHookText}
-                          </p>
-                        </div>
-                      ) : null}
-
-                      <div
-                        className="absolute inset-x-0 z-10 px-5 text-center font-semibold"
+              <div className="mt-4 overflow-hidden rounded-[30px] border border-white/10 bg-black">
+                <div className="relative aspect-[9/16]">
+                  {sourceIsVideo && sourceUrl ? (
+                    <>
+                      <video
+                        ref={backgroundVideoRef}
+                        key={`bg-${sourceFile?.id}-${styleCandidate.id}-${previewNonce}`}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        className={cn(
+                          "absolute inset-0 h-full w-full",
+                          isQuickCaptionMode ? "object-contain" : "scale-110 object-cover"
+                        )}
                         style={{
-                          bottom: `${(draft.captions.bottomOffset / 1920) * 100}%`,
-                          fontSize: `${draft.captions.fontSize * 0.29}px`,
-                          color: captionBaseColor,
-                          textShadow: captionTextShadow(draft.captions.outlineStrength, draft.captions.shadowStrength),
-                          WebkitTextStroke: `${Math.max(0.4, draft.captions.outlineStrength * 0.16)}px rgba(8,8,8,0.92)`
+                          filter: isQuickCaptionMode
+                            ? "none"
+                            : `blur(${8 + previewComposition.blurIntensity * 0.42}px) brightness(0.82) saturate(0.88)`
+                        }}
+                        src={sourceUrl}
+                      />
+                      {!isQuickCaptionMode ? (
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,6,5,0.12),rgba(7,6,5,0.32))]" />
+                      ) : null}
+                      <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+                        <video
+                          ref={foregroundVideoRef}
+                          key={`fg-${sourceFile?.id}-${styleCandidate.id}-${previewNonce}`}
+                          muted
+                          playsInline
+                          controls
+                          preload="metadata"
+                          className="h-full w-full object-contain"
+                          style={{
+                            transform: `translateY(${previewComposition.foregroundVerticalOffset * 0.18}px) scale(${previewComposition.foregroundScale})`
+                          }}
+                          src={sourceUrl}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div
+                      className={cn(
+                        "absolute inset-0",
+                        editingProjectDefaultOnly
+                          ? "bg-black"
+                          : "bg-[radial-gradient(circle_at_top,rgba(206,188,155,0.24),transparent_32%),linear-gradient(180deg,rgba(11,10,9,0.58),rgba(11,10,9,0.92))]"
+                      )}
+                    />
+                  )}
+
+                  {!isQuickCaptionMode ? (
+                    <div
+                      className={cn(
+                        "absolute left-1/2 z-10 -translate-x-1/2 rounded-[20px]",
+                        hookPreviewBoxClass(draft.hook.backgroundStyle)
+                      )}
+                      style={{
+                        top: `${(draft.hook.topOffset / 1920) * 100}%`,
+                        width: `${clamp((draft.hook.boxWidth / 1080) * 100, 40, 88)}%`,
+                        padding: `${draft.hook.boxPadding * 0.28}px ${draft.hook.boxPadding * 0.34}px`
+                      }}
+                    >
+                      <p
+                        className="whitespace-pre-wrap break-words font-semibold leading-[1.12]"
+                        style={{
+                          fontSize: `${draft.hook.fontSize * 0.34}px`,
+                          textAlign: draft.hook.textAlignment,
+                          display: "-webkit-box",
+                          WebkitBoxOrient: "vertical",
+                          WebkitLineClamp: draft.hook.maxLines,
+                          overflow: "hidden"
                         }}
                       >
-                        <div className="mx-auto max-w-[88%]" style={{ fontFamily: captionFontFamily }}>
-                          {draft.captions.displayMode === "word" ? (
-                            <p
-                              className="inline-block break-words leading-[1.02]"
-                              style={{
-                                color: captionActiveColor,
-                                transform: "scale(1.06)"
-                              }}
-                            >
-                              {captionActiveWord}
-                            </p>
-                          ) : draft.captions.displayMode === "sentence" ? (
-                            captionLines.length ? (
-                              captionLines.map((line, lineIndex) => (
-                                <p key={`${lineIndex}-${line.join("-")}`} className="leading-[1.08] break-words">
-                                  {line.join(" ")}
-                                </p>
-                              ))
-                            ) : (
-                              <p className="leading-[1.08] break-words">{captionPreview.sentence || "Captions preview"}</p>
-                            )
-                          ) : captionLines.length ? (
-                            <div className="flex flex-col gap-1">
-                              {captionLines.map((line, lineIndex) => {
-                                const offset = captionLines.slice(0, lineIndex).reduce((count, current) => count + current.length, 0);
-                                return (
-                                  <p key={`${lineIndex}-${line.join("-")}`} className="leading-[1.08] break-words">
-                                    {line.map((word, wordIndex) => {
-                                      const absoluteIndex = offset + wordIndex;
-                                      const active = absoluteIndex === captionPreview.activeWordIndex;
-                                      return (
-                                        <span
-                                          key={`${word}-${absoluteIndex}`}
-                                          className="inline-block"
-                                          style={{
-                                            color: active ? captionActiveColor : captionBaseColor,
-                                            transform: active ? "scale(1.05)" : "scale(1)",
-                                            transition: "all 0.1s ease-in-out"
-                                          }}
-                                        >
-                                          {word}
-                                          {wordIndex < line.length - 1 ? " " : ""}
-                                        </span>
-                                      );
-                                    })}
-                                  </p>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p className="leading-[1.08] break-words">Captions preview</p>
-                          )}
-                        </div>
-                      </div>
+                        {previewHookText}
+                      </p>
                     </div>
-                  </div>
+                  ) : null}
 
-                  <div className="mt-3 flex items-center justify-between gap-3 text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    <span>{sourceIsVideo ? "Previewing source media" : "Previewing style only"}</span>
-                    <span>{CLIP_STYLE_PRESET_OPTIONS.find((option) => option.id === draft.stylePreset)?.label || "Clean"} preset</span>
+                  <div
+                    className="absolute inset-x-0 z-10 px-5 text-center font-semibold"
+                    style={{
+                      bottom: `${(draft.captions.bottomOffset / 1920) * 100}%`,
+                      fontSize: `${draft.captions.fontSize * 0.29}px`,
+                      color: captionBaseColor,
+                      textShadow: captionTextShadow(draft.captions.outlineStrength, draft.captions.shadowStrength),
+                      WebkitTextStroke: `${Math.max(0.4, draft.captions.outlineStrength * 0.16)}px rgba(8,8,8,0.92)`
+                    }}
+                  >
+                    <div className="mx-auto max-w-[88%]" style={{ fontFamily: captionFontFamily }}>
+                      {draft.captions.displayMode === "word" ? (
+                        <p
+                          className="inline-block break-words leading-[1.02]"
+                          style={{
+                            color: captionActiveColor,
+                            transform: "scale(1.06)"
+                          }}
+                        >
+                          {captionActiveWord}
+                        </p>
+                      ) : draft.captions.displayMode === "sentence" ? (
+                        captionLines.length ? (
+                          captionLines.map((line, lineIndex) => (
+                            <p key={`${lineIndex}-${line.join("-")}`} className="break-words leading-[1.08]">
+                              {line.join(" ")}
+                            </p>
+                          ))
+                        ) : (
+                          <p className="break-words leading-[1.08]">{captionPreview.sentence || "Captions preview"}</p>
+                        )
+                      ) : captionLines.length ? (
+                        <div className="flex flex-col gap-1">
+                          {captionLines.map((line, lineIndex) => {
+                            const offset = captionLines.slice(0, lineIndex).reduce((count, current) => count + current.length, 0);
+                            return (
+                              <p key={`${lineIndex}-${line.join("-")}`} className="break-words leading-[1.08]">
+                                {line.map((word, wordIndex) => {
+                                  const absoluteIndex = offset + wordIndex;
+                                  const active = absoluteIndex === captionPreview.activeWordIndex;
+                                  return (
+                                    <span
+                                      key={`${word}-${absoluteIndex}`}
+                                      className="inline-block"
+                                      style={{
+                                        color: active ? captionActiveColor : captionBaseColor,
+                                        transform: active ? "scale(1.05)" : "scale(1)",
+                                        transition: "all 0.1s ease-in-out"
+                                      }}
+                                    >
+                                      {word}
+                                      {wordIndex < line.length - 1 ? " " : ""}
+                                    </span>
+                                  );
+                                })}
+                              </p>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="break-words leading-[1.08]">Captions preview</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div className="rounded-[28px] border border-border/70 bg-card/70 p-4">
-                  <Tabs defaultValue="captions" className="w-full">
-                    <TabsList>
-                      <TabsTrigger value="presets">Presets</TabsTrigger>
-                      <TabsTrigger value="captions">Captions</TabsTrigger>
-                      {!isQuickCaptionMode ? <TabsTrigger value="hook">Hook</TabsTrigger> : null}
-                      {!isQuickCaptionMode ? <TabsTrigger value="stage">Stage</TabsTrigger> : null}
-                    </TabsList>
+              <div className="mt-3 flex items-center justify-between gap-3 text-xs uppercase tracking-[0.16em] text-white/50">
+                <span>{sourceIsVideo ? "Previewing source media" : "Previewing style only"}</span>
+                <span>{CLIP_STYLE_PRESET_OPTIONS.find((option) => option.id === draft.stylePreset)?.label || "Clean"} preset</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="min-h-0 overflow-y-auto border-l border-border/70 bg-background">
+          <div className="flex min-h-full flex-col">
+              <div className="space-y-4 px-6 py-6">
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <p className="panel-label">{editingProjectDefaultOnly ? "Project default style" : "Clip title"}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {sourceFile && onRenameSourceFile ? (
+                      isEditingTitle ? (
+                        <input
+                          autoFocus
+                          value={editTitleValue}
+                          disabled={renamingTitle}
+                          onChange={(event) => setEditTitleValue(event.currentTarget.value)}
+                          onBlur={() => void handleTitleCommit()}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void handleTitleCommit();
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              setEditTitleValue(sourceFileBaseName);
+                              setIsEditingTitle(false);
+                            }
+                          }}
+                          className="min-w-[220px] flex-1 border-0 border-b border-border/80 bg-transparent px-0 pb-1 text-2xl font-semibold tracking-tight text-foreground outline-none transition focus:border-primary"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="group inline-flex items-center gap-2 text-left"
+                          onClick={() => {
+                            setEditTitleValue(sourceFileBaseName);
+                            setIsEditingTitle(true);
+                          }}
+                        >
+                          <h2 className="text-2xl font-semibold tracking-tight text-foreground">{sourceFileBaseName || sourceFile.name}</h2>
+                          <Pencil className="size-4 text-muted-foreground transition group-hover:text-foreground" />
+                        </button>
+                      )
+                    ) : (
+                      <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+                        {editingProjectDefaultOnly ? "Edit project default style" : "Edit clip"}
+                      </h2>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="muted">{candidateLabel(previewCandidate)}</Badge>
+                  <Badge variant={hasClipSpecificStyle ? "success" : "muted"}>
+                    {editingProjectDefaultOnly
+                      ? activeOverrides
+                        ? "Project default"
+                        : "Unsaved project default"
+                      : hasClipSpecificStyle
+                        ? "Clip-specific style"
+                        : activeOverrides
+                          ? "Using project default"
+                          : "Not saved yet"}
+                  </Badge>
+                  {hasUnsavedChanges ? <Badge variant="warning">Unsaved</Badge> : null}
+                </div>
+                </div>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  {editingProjectDefaultOnly
+                    ? "Tune the shared caption look once, save it as the project default, then batch render completed clips."
+                    : sourceFile && onRenameSourceFile
+                      ? "Name the clip here, then shape the transcript and design before the next render."
+                      : "Shape the transcript and design in one place, then save or render with the updated subtitles."}
+                </p>
+              </div>
+
+              <div className="rounded-[28px] border border-border/70 bg-card/70 p-4">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                  <TabsList className={cn("grid w-full", isQuickCaptionMode ? "grid-cols-3" : "grid-cols-5")}>
+                    <TabsTrigger value="presets">Presets</TabsTrigger>
+                    <TabsTrigger value="transcript">Transcript</TabsTrigger>
+                    <TabsTrigger value="design">Design</TabsTrigger>
+                    {!isQuickCaptionMode ? <TabsTrigger value="hook">Hook</TabsTrigger> : null}
+                    {!isQuickCaptionMode ? <TabsTrigger value="stage">Stage</TabsTrigger> : null}
+                  </TabsList>
 
                     <TabsContent value="presets" className="space-y-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -768,10 +904,70 @@ export function ClipStyleEditor({
                       </div>
                     </TabsContent>
 
-                    <TabsContent value="captions" className="space-y-4">
+                    <TabsContent value="transcript" className="space-y-4">
                       <div className="flex items-center gap-2">
                         <Sparkles className="size-4 text-primary" />
-                        <h3 className="text-base font-semibold text-foreground">Captions</h3>
+                        <h3 className="text-base font-semibold text-foreground">Transcript</h3>
+                      </div>
+
+                      {previewCandidate.subtitle_segments.length ? (
+                        <div className="rounded-[24px] border border-border/70 bg-background/55 p-5">
+                          <p className="text-sm leading-6 text-muted-foreground">
+                            Click any word to correct it inline. Updates feed the live preview and the next render automatically.
+                          </p>
+                          <div className="mt-5 text-[1.02rem] leading-8 text-foreground">
+                            {previewCandidate.subtitle_segments.map((segment, segmentIndex) => (
+                              <span key={`${segment.start}-${segment.end}-${segmentIndex}`}>
+                                {segment.words.map((word, wordIndex) => {
+                                  const currentWordKey = wordEditKey(segmentIndex, wordIndex);
+                                  const editing = editingWordIndex === currentWordKey;
+                                  return editing ? (
+                                    <Input
+                                      key={currentWordKey}
+                                      autoFocus
+                                      value={editingWordValue}
+                                      onChange={(event) => setEditingWordValue(event.currentTarget.value)}
+                                      onBlur={() => handleWordEditCommit(segmentIndex, wordIndex)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          event.preventDefault();
+                                          handleWordEditCommit(segmentIndex, wordIndex);
+                                        }
+                                        if (event.key === "Escape") {
+                                          event.preventDefault();
+                                          handleWordEditCancel();
+                                        }
+                                      }}
+                                      className="mb-1 mr-1 inline-block h-9 min-w-[3rem] w-auto rounded-md border-border/70 bg-card px-2 text-sm shadow-none"
+                                      style={{ width: `${Math.max(editingWordValue.length, 2)}ch` }}
+                                    />
+                                  ) : (
+                                    <span
+                                      key={currentWordKey}
+                                      className="mb-1 mr-1 inline-block cursor-pointer rounded px-1 transition-colors hover:bg-primary/20"
+                                      onClick={() => handleWordEditStart(segmentIndex, wordIndex, word.word)}
+                                    >
+                                      {word.word}
+                                    </span>
+                                  );
+                                })}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-[24px] border border-border/70 bg-background/55 p-5 text-sm leading-6 text-muted-foreground">
+                          {editingProjectDefaultOnly
+                            ? "Open a specific transcribed clip when you want to edit individual words. Project default mode focuses on reusable caption styling."
+                            : "No subtitle words were generated for this clip."}
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="design" className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="size-4 text-primary" />
+                        <h3 className="text-base font-semibold text-foreground">Design</h3>
                       </div>
 
                       <div className="grid gap-4 lg:grid-cols-2">
@@ -979,33 +1175,6 @@ export function ClipStyleEditor({
                           }
                         />
                       </div>
-
-                      <div className="rounded-[24px] border border-border/70 bg-background/55 p-4">
-                        <div>
-                          <p className="panel-label">Transcript Corrections</p>
-                          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                            Correct caption typos here. These updates feed the live preview and the next re-render for this clip.
-                          </p>
-                        </div>
-                        {previewCandidate.subtitle_segments.length ? (
-                          <div className="mt-4 max-h-[320px] space-y-3 overflow-y-auto pr-1 custom-scrollbar">
-                            {previewCandidate.subtitle_segments.map((segment, index) => (
-                              <div key={`${segment.start}-${segment.end}-${index}`} className="space-y-2 rounded-[20px] border border-border/60 bg-card/80 p-3">
-                                <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                                  Segment {index + 1} · {segment.start.toFixed(1)}s to {segment.end.toFixed(1)}s
-                                </div>
-                                <Input value={segment.text} onChange={(event) => handleSubtitleSegmentChange(index, event.currentTarget.value)} />
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="mt-4 text-sm leading-6 text-muted-foreground">
-                            {editingProjectDefaultOnly
-                              ? "Transcript corrections become available after a clip has been transcribed."
-                              : "No subtitle segments were generated for this clip."}
-                          </p>
-                        )}
-                      </div>
                     </TabsContent>
 
                     {!isQuickCaptionMode ? (
@@ -1187,78 +1356,79 @@ export function ClipStyleEditor({
                       </TabsContent>
                     ) : null}
                   </Tabs>
+              </div>
+
+              <div className="sticky bottom-0 z-10 mt-auto border-t border-border/70 bg-background/95 px-6 py-4 backdrop-blur">
+                <div className="flex flex-col gap-4">
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {colorsValid
+                      ? "Clip styles now persist with the project, and project defaults can be reused on later clips."
+                      : "Use full #RRGGBB values for caption colors before saving or re-rendering."}
+                  </p>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button type="button" variant="secondary" onClick={() => setPreviewNonce((current) => current + 1)}>
+                      Preview
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        setDraft((current) => {
+                          if (!current) {
+                            return current;
+                          }
+                          const next = deriveClipStyleDefaults(styleCandidate, preset, current.stylePreset);
+                          return {
+                            ...next,
+                            hook: {
+                              ...next.hook,
+                              hookText: current.hook.hookText
+                            }
+                          };
+                        })
+                      }
+                    >
+                      <RotateCcw className="mr-2 size-4" />
+                      Reset to preset
+                    </Button>
+                    {!isQuickCaptionMode ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={!colorsValid || !sourceJobId || !hasUnsavedChanges || savingClip || rendering || busy}
+                        onClick={() => void handleSaveClipStyle()}
+                      >
+                        {savingClip ? "Saving..." : "Save changes for this clip"}
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!colorsValid || savingProjectDefault || rendering || busy}
+                      onClick={() => void handleSaveProjectDefault()}
+                    >
+                      {savingProjectDefault ? "Saving..." : "Save as project default"}
+                    </Button>
+                    {isQuickCaptionMode ? (
+                      <Button
+                        type="button"
+                        disabled={!colorsValid || !sourceJobId || busy || rendering || savingClip}
+                        onClick={() => void handleQuickCaptionSaveAndRender()}
+                      >
+                        {busy || rendering || savingClip ? "Saving & Rendering..." : "Save & Render Video"}
+                      </Button>
+                    ) : (
+                      <Button type="button" disabled={!colorsValid || !sourceJobId || busy || rendering} onClick={() => void handleRender()}>
+                        {busy || rendering ? "Rendering..." : "Re-render"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-
-          <DialogFooter className="mt-0 items-center justify-between border-t border-border/70 px-6 py-4">
-            <p className="text-sm leading-6 text-muted-foreground">
-              {colorsValid
-                ? "Clip styles now persist with the project, and project defaults can be reused on later clips."
-                : "Use full #RRGGBB values for caption colors before saving or re-rendering."}
-            </p>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button type="button" variant="secondary" onClick={() => setPreviewNonce((current) => current + 1)}>
-                Preview
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() =>
-                  setDraft((current) => {
-                    if (!current) {
-                      return current;
-                    }
-                    const next = deriveClipStyleDefaults(styleCandidate, preset, current.stylePreset);
-                    return {
-                      ...next,
-                      hook: {
-                        ...next.hook,
-                        hookText: current.hook.hookText
-                      }
-                    };
-                  })
-                }
-              >
-                <RotateCcw className="mr-2 size-4" />
-                Reset to preset
-              </Button>
-              {!isQuickCaptionMode ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!colorsValid || !sourceJobId || !hasUnsavedChanges || savingClip || rendering || busy}
-                  onClick={() => void handleSaveClipStyle()}
-                >
-                  {savingClip ? "Saving..." : "Save changes for this clip"}
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={!colorsValid || savingProjectDefault || rendering || busy}
-                onClick={() => void handleSaveProjectDefault()}
-              >
-                {savingProjectDefault ? "Saving..." : "Save as project default"}
-              </Button>
-              {isQuickCaptionMode ? (
-                <Button
-                  type="button"
-                  disabled={!colorsValid || !sourceJobId || busy || rendering || savingClip}
-                  onClick={() => void handleQuickCaptionSaveAndRender()}
-                >
-                  {busy || rendering || savingClip ? "Saving & Rendering..." : "Save & Render Video"}
-                </Button>
-              ) : (
-                <Button type="button" disabled={!colorsValid || !sourceJobId || busy || rendering} onClick={() => void handleRender()}>
-                  {busy || rendering ? "Rendering..." : "Re-render"}
-                </Button>
-              )}
-            </div>
-          </DialogFooter>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }

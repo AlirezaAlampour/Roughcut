@@ -28,6 +28,7 @@ interface FileListProps {
   enableBulkActions?: boolean;
   onDeleteSelected?: (files: FileItem[]) => Promise<void> | void;
   onRenderSelected?: (files: FileItem[]) => Promise<void> | void;
+  onBatchProcessSelected?: (files: FileItem[]) => Promise<void> | void;
 }
 
 function triggerDownloads(files: FileItem[]) {
@@ -58,11 +59,13 @@ export function FileList({
   listClassName,
   enableBulkActions = false,
   onDeleteSelected,
-  onRenderSelected
+  onRenderSelected,
+  onBatchProcessSelected
 }: FileListProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkRendering, setBulkRendering] = useState(false);
+  const [bulkBatchProcessing, setBulkBatchProcessing] = useState(false);
 
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => files.some((file) => file.id === id)));
@@ -107,6 +110,19 @@ export function FileList({
       await onRenderSelected(selectedFiles);
     } finally {
       setBulkRendering(false);
+    }
+  }
+
+  async function handleBatchProcessSelected() {
+    if (!onBatchProcessSelected || selectedFiles.length === 0) {
+      return;
+    }
+    try {
+      setBulkBatchProcessing(true);
+      await onBatchProcessSelected(selectedFiles);
+    } finally {
+      setSelectedIds([]);
+      setBulkBatchProcessing(false);
     }
   }
 
@@ -224,12 +240,23 @@ export function FileList({
 
             {selectedFiles.length > 0 ? (
               <div className="flex flex-wrap items-center gap-2">
+                {onBatchProcessSelected ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={bulkDeleting || bulkRendering || bulkBatchProcessing}
+                    onClick={() => void handleBatchProcessSelected()}
+                  >
+                    {bulkBatchProcessing ? "Starting..." : "Batch Process Selected"}
+                  </Button>
+                ) : null}
                 {onRenderSelected ? (
                   <Button
                     type="button"
                     size="sm"
-                    disabled={bulkDeleting || bulkRendering}
+                    disabled={bulkDeleting || bulkRendering || bulkBatchProcessing}
                     onClick={() => void handleRenderSelected()}
+                    variant={onBatchProcessSelected ? "secondary" : "default"}
                   >
                     {bulkRendering ? "Starting..." : "Render Selected"}
                   </Button>
@@ -238,7 +265,7 @@ export function FileList({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  disabled={bulkDeleting || bulkRendering}
+                  disabled={bulkDeleting || bulkRendering || bulkBatchProcessing}
                   onClick={() => triggerDownloads(selectedFiles)}
                 >
                   Download Selected
@@ -246,7 +273,7 @@ export function FileList({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={bulkDeleting || bulkRendering}
+                  disabled={bulkDeleting || bulkRendering || bulkBatchProcessing}
                   onClick={() => void handleDeleteSelected()}
                 >
                   {bulkDeleting ? "Deleting..." : "Delete Selected"}

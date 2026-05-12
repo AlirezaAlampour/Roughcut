@@ -29,6 +29,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NameDialog } from "@/components/ui/name-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { hasClipStyleOverrides } from "@/lib/clip-style";
 import { formatDuration, formatTimestamp } from "@/lib/format";
@@ -217,7 +218,12 @@ function preferredQuickCaptionJobForFile(jobs: JobSummary[], sourceFileId: strin
   const matchingJobs = jobs.filter(
     (job) => job.kind === "shorts_candidate_generation" && !job.generate_shorts && job.source_file_id === sourceFileId
   );
-  return matchingJobs.find((job) => job.status === "completed") || matchingJobs[0] || null;
+  return (
+    matchingJobs.find((job) => job.status === "completed") ||
+    matchingJobs.find((job) => job.status === "queued" || job.status === "running") ||
+    matchingJobs[0] ||
+    null
+  );
 }
 
 export default function ProjectDetailPage() {
@@ -225,6 +231,7 @@ export default function ProjectDetailPage() {
   const projectId = params.projectId;
   const projectRequestRef = useRef(0);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const autoRenderQueue = useRef<Set<string>>(new Set());
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [presets, setPresets] = useState<PresetConfig[]>([]);
@@ -239,6 +246,7 @@ export default function ProjectDetailPage() {
   const [previewStartSec, setPreviewStartSec] = useState<number | null>(null);
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("uploads");
   const [quickCaptionOutputFilter, setQuickCaptionOutputFilter] = useState<QuickCaptionOutputFilter>("videos");
+  const [autoRenderEnabled, setAutoRenderEnabled] = useState(true);
   const [renameTarget, setRenameTarget] = useState<FileItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -293,10 +301,12 @@ export default function ProjectDetailPage() {
     return () => {
       active = false;
       projectRequestRef.current += 1;
+      autoRenderQueue.current.clear();
     };
   }, [projectId]);
 
   const sortedJobs = [...(project?.jobs || [])].sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+  const quickCaptionProject = isQuickCaptionProject(project);
   const activeJobs = sortedJobs.filter((job) => job.status === "queued" || job.status === "running");
   const uploads = project?.files.filter((file) => file.kind === "upload") || [];
   const outputs = project?.files.filter((file) => file.kind === "output") || [];
@@ -354,6 +364,60 @@ export default function ProjectDetailPage() {
     return () => window.clearInterval(interval);
   }, [activeJobs.length, projectId]);
 
+  useEffect(() => {
+    if (!quickCaptionProject || !project || autoRenderQueue.current.size === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const projectDefaultStyle = project.clip_style_defaults || undefined;
+
+    async function watchAutoRenderQueue() {
+      for (const jobId of Array.from(autoRenderQueue.current)) {
+        if (cancelled) {
+          return;
+        }
+
+        const queuedJob = sortedJobs.find((job) => job.id === jobId);
+        if (!queuedJob) {
+          continue;
+        }
+
+        if (queuedJob.status === "failed") {
+          autoRenderQueue.current.delete(jobId);
+          continue;
+        }
+
+        const candidate = queuedJob.status === "completed" ? queuedJob.result?.candidates[0] || candidateFromPayload(queuedJob) : null;
+        if (!candidate) {
+          continue;
+        }
+
+        autoRenderQueue.current.delete(jobId);
+
+        try {
+          await api.exportCandidate(
+            projectId,
+            queuedJob.id,
+            candidate.id,
+            true,
+            projectDefaultStyle
+          );
+          toast.success("Auto-render started for a clip!");
+          void loadProject();
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Could not start auto-render for a clip.");
+        }
+      }
+    }
+
+    void watchAutoRenderQueue();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [project, projectId, quickCaptionProject]);
+
   const uploadBusy = uploadPhase !== null;
 
   async function handleUpload(files: File[]) {
@@ -385,7 +449,7 @@ export default function ProjectDetailPage() {
         if (!currentPreset || !settings) {
           toast.warning("Upload complete, but caption defaults are unavailable so batch transcription was not queued.");
         } else {
-          await queueQuickCaptionJobs(response.files, currentPreset);
+          await queueQuickCaptionJobs(response.files, currentPreset, autoRenderEnabled);
         }
       } else if (response.errors.length === 0) {
         toast.success("Upload complete.");
@@ -413,6 +477,15 @@ export default function ProjectDetailPage() {
       setRenameTarget(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not rename file.");
+    }
+  }
+
+  async function handleRenameFileDirectly(fileId: string, newName: string) {
+    try {
+      await api.renameFile(projectId, fileId, newName);
+      await loadProject();
+    } catch {
+      toast.error("Could not rename file.");
     }
   }
 
@@ -472,7 +545,7 @@ export default function ProjectDetailPage() {
     setClipEditorOpen(true);
   }
 
-  async function handleCreateJob(payload: JobCreateRequest) {
+  async function handleCreateJob(payload: JobCreateRequest, options?: { notify?: boolean; refreshProject?: boolean }) {
     try {
       setJobBusy(true);
       const createdJob = await api.createJob(projectId, payload);
@@ -482,8 +555,12 @@ export default function ProjectDetailPage() {
       setPreviewStartSec(null);
       setInspectorOpen(false);
       setEditingProjectDefaultStyle(false);
-      await loadProject();
-      toast.success(payload.generate_shorts ? "Shorts candidate job queued." : "Quick caption job queued.");
+      if (options?.refreshProject !== false) {
+        await loadProject();
+      }
+      if (options?.notify !== false) {
+        toast.success(payload.generate_shorts ? "Shorts candidate job queued." : "Quick caption job queued.");
+      }
       return createdJob;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create job.");
@@ -493,7 +570,7 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function queueQuickCaptionJobs(sourceFiles: FileItem[], quickPreset: PresetConfig) {
+  async function queueQuickCaptionJobs(sourceFiles: FileItem[], quickPreset: PresetConfig, shouldAutoRender = false) {
     if (!settings) {
       toast.error("Caption defaults are not available yet.");
       return [];
@@ -517,6 +594,12 @@ export default function ProjectDetailPage() {
         .filter((result): result is PromiseFulfilledResult<JobSummary> => result.status === "fulfilled")
         .map((result) => result.value);
       const failedCount = results.length - createdJobs.length;
+
+      if (shouldAutoRender) {
+        for (const job of createdJobs) {
+          autoRenderQueue.current.add(job.id);
+        }
+      }
 
       if (queuedFiles[0]) {
         setSelectedFileId(queuedFiles[0].id);
@@ -589,6 +672,79 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function handleBatchProcessSelectedQuickCaptionFiles(files: FileItem[]) {
+    if (!currentPreset || !settings) {
+      toast.error("Caption defaults are not available yet.");
+      return;
+    }
+
+    const uploadFiles = files.filter((file) => file.kind === "upload");
+    if (uploadFiles.length === 0) {
+      toast.warning("Select uploaded shorts to start the batch pipeline.");
+      return;
+    }
+
+    try {
+      let startedAny = false;
+
+      for (const file of uploadFiles) {
+        const existingJob = preferredQuickCaptionJobForFile(sortedJobs, file.id);
+
+        if (!existingJob || existingJob.status === "failed") {
+          const createdJob = await handleCreateJob(quickCaptionJobPayload(file.id, currentPreset, settings), {
+            notify: false,
+            refreshProject: false
+          });
+          if (createdJob) {
+            autoRenderQueue.current.add(createdJob.id);
+            startedAny = true;
+          }
+          continue;
+        }
+
+        if (existingJob.status === "queued" || existingJob.status === "running") {
+          autoRenderQueue.current.add(existingJob.id);
+          startedAny = true;
+          continue;
+        }
+
+        const candidate = existingJob.result?.candidates[0] || candidateFromPayload(existingJob);
+        if (!candidate) {
+          const createdJob = await handleCreateJob(quickCaptionJobPayload(file.id, currentPreset, settings), {
+            notify: false,
+            refreshProject: false
+          });
+          if (createdJob) {
+            autoRenderQueue.current.add(createdJob.id);
+            startedAny = true;
+          }
+          continue;
+        }
+
+        const exportRuns = candidateExportJobs(sortedJobs, existingJob.id, candidate.id);
+        const hasCompletedExport = exportRuns.some((job) => job.status === "completed");
+        const hasActiveExport = exportRuns.some((job) => job.status === "queued" || job.status === "running");
+
+        if (hasCompletedExport || hasActiveExport) {
+          continue;
+        }
+
+        await api.exportCandidate(projectId, existingJob.id, candidate.id, true, project?.clip_style_defaults || undefined);
+        startedAny = true;
+      }
+
+      if (!startedAny) {
+        toast.warning("Selected files are already rendered or already moving through the batch pipeline.");
+        return;
+      }
+
+      await loadProject();
+      toast.success("Batch pipeline started! Grab a coffee.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not start the batch pipeline.");
+    }
+  }
+
   async function handleQuickGenerate(sourceFile: FileItem | null, quickPreset: PresetConfig | null) {
     if (!sourceFile) {
       setLibraryDialogOpen(true);
@@ -621,7 +777,7 @@ export default function ProjectDetailPage() {
       return;
     }
 
-    await queueQuickCaptionJobs([sourceFile], quickPreset);
+    await queueQuickCaptionJobs([sourceFile], quickPreset, autoRenderEnabled);
   }
 
   async function handleCancelJob(jobId: string) {
@@ -800,7 +956,6 @@ export default function ProjectDetailPage() {
     );
   }
 
-  const quickCaptionProject = isQuickCaptionProject(project);
   const quickCaptionJobs = sortedJobs.filter((job) => job.kind === "shorts_candidate_generation" && !job.generate_shorts);
   const latestQuickCaptionJob = quickCaptionJobs[0] ?? null;
   const activeQuickCaptionJobs = quickCaptionJobs.filter((job) => job.status === "queued" || job.status === "running");
@@ -1074,6 +1229,16 @@ export default function ProjectDetailPage() {
                   </p>
                 </div>
 
+                <div className="flex items-center justify-between gap-3 rounded-[22px] border border-border/70 bg-background/70 px-4 py-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">Auto-render final MP4s using Default Style</p>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      Queue exports automatically as each transcript finishes so batch uploads can run unattended.
+                    </p>
+                  </div>
+                  <Switch checked={autoRenderEnabled} onCheckedChange={setAutoRenderEnabled} aria-label="Auto-render final MP4s using Default Style" />
+                </div>
+
                 <Button
                   className="h-11 w-full"
                   disabled={!quickCaptionSourceFile || jobBusy || uploadBusy || !currentPreset}
@@ -1083,14 +1248,17 @@ export default function ProjectDetailPage() {
                   {jobBusy ? "Queueing..." : "Transcribe & Caption"}
                 </Button>
 
-                <Button
-                  variant="secondary"
-                  className="w-full"
-                  disabled={!currentPreset}
-                  onClick={handleOpenProjectDefaultStyleEditor}
-                >
-                  Edit Default Style
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    className="min-w-[220px] flex-1"
+                    disabled={!currentPreset}
+                    onClick={handleOpenProjectDefaultStyleEditor}
+                  >
+                    Edit Default Style
+                  </Button>
+                  <Badge variant="muted">Styles applied automatically on batch.</Badge>
+                </div>
 
                 {selectedCandidate && candidateReviewJob ? (
                   <Button variant="secondary" className="w-full" onClick={() => handleOpenCandidateEditor(candidateReviewJob, selectedCandidate)}>
@@ -1156,6 +1324,7 @@ export default function ProjectDetailPage() {
             enableBulkActions
             onDeleteSelected={handleDeleteFiles}
             onRenderSelected={libraryTab === "uploads" ? handleRenderSelectedQuickCaptionFiles : undefined}
+            onBatchProcessSelected={libraryTab === "uploads" ? handleBatchProcessSelectedQuickCaptionFiles : undefined}
             className="xl:h-[520px]"
             contentClassName="min-h-0"
             listClassName="min-h-0 flex-1 overflow-y-auto"
@@ -1343,6 +1512,16 @@ export default function ProjectDetailPage() {
         onSaveProjectDefault={async (overrides, options) => {
           await persistProjectDefaultClipStyle(overrides, options);
         }}
+        onRenameSourceFile={
+          editingProjectDefaultStyle || !(candidateSourceFile || currentSourceFile)
+            ? undefined
+            : async (newName) => {
+                const nextSourceFile = candidateSourceFile || currentSourceFile;
+                if (nextSourceFile) {
+                  await handleRenameFileDirectly(nextSourceFile.id, newName);
+                }
+              }
+        }
         onRender={async (overrides, subtitleSegments) => {
           if (selectedCandidate && candidateReviewJob) {
             await handleExportCandidate(candidateReviewJob, selectedCandidate, overrides, subtitleSegments);
