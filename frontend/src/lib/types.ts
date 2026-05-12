@@ -36,10 +36,19 @@ export interface JobResult {
   transcript_file_id: string | null;
   subtitle_file_id: string | null;
   edit_plan_file_id: string | null;
+  candidate_manifest_file_id: string | null;
   log_file_id: string | null;
+  trace_file_id: string | null;
+  planner_prompt_file_id: string | null;
+  planner_response_file_id: string | null;
+  render_command_file_id: string | null;
   notes_for_user: string[];
   transcript_preview: string | null;
   plan: Record<string, unknown> | null;
+  candidates: CandidateClip[];
+  candidate_count: number;
+  exported_candidate_id: string | null;
+  export: Record<string, unknown> | null;
 }
 
 export interface JobSummary {
@@ -75,9 +84,63 @@ export interface ProjectSummary {
   status_summary: ProjectStatusSummary;
 }
 
+export type ClipStylePresetId = "clean" | "bold" | "aggressive";
+
+export type ClipHookTextAlignment = "left" | "center" | "right";
+export type ClipHookBackgroundStyle = "light" | "dark" | "transparent";
+export type CaptionDisplayMode = "word" | "sentence" | "karaoke";
+
+export interface ClipHookStyleOverrides {
+  hook_text?: string;
+  font_size?: number;
+  top_offset?: number;
+  box_width?: number;
+  box_padding?: number;
+  max_lines?: number;
+  text_alignment?: ClipHookTextAlignment;
+  background_style?: ClipHookBackgroundStyle;
+}
+
+export interface ClipCaptionStyleOverrides {
+  base_color?: string;
+  active_word_color?: string;
+  font_family?: string;
+  font_size?: number;
+  display_mode?: CaptionDisplayMode;
+  vertical_position?: "lower" | "lower_middle" | "center";
+  bottom_offset?: number;
+  max_lines?: number;
+  outline_strength?: number;
+  shadow_strength?: number;
+}
+
+export interface ClipCompositionStyleOverrides {
+  blur_intensity?: number;
+  foreground_scale?: number;
+  foreground_vertical_offset?: number;
+}
+
+export interface ClipStyleOverrides {
+  style_preset?: ClipStylePresetId;
+  hook?: ClipHookStyleOverrides;
+  captions?: ClipCaptionStyleOverrides;
+  composition?: ClipCompositionStyleOverrides;
+}
+
+export interface ProjectClipStyle {
+  project_id: string;
+  source_candidate_job_id: string;
+  candidate_id: string;
+  style_overrides: ClipStyleOverrides;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProjectDetail extends ProjectSummary {
   files: FileItem[];
   jobs: JobSummary[];
+  clip_style_defaults: ClipStyleOverrides | null;
+  clip_styles: ProjectClipStyle[];
 }
 
 export interface UploadResponse {
@@ -92,6 +155,7 @@ export interface SettingsResponse {
   cut_aggressiveness: Aggressiveness;
   captions_enabled: boolean;
   output_quality_preset: OutputQuality;
+  enable_detailed_planner_logging: boolean;
   project_storage_root: string;
   transcription_model: string;
 }
@@ -103,6 +167,7 @@ export interface SettingsUpdateRequest {
   cut_aggressiveness?: Aggressiveness;
   captions_enabled?: boolean;
   output_quality_preset?: OutputQuality;
+  enable_detailed_planner_logging?: boolean;
 }
 
 export interface PresetConfig {
@@ -118,6 +183,51 @@ export interface PresetConfig {
   shorts_behavior: string;
   cta_preservation: string;
   planner_hint: string;
+  target_clip_min_sec: number;
+  target_clip_max_sec: number;
+  target_clip_ideal_sec: number;
+  candidate_overlap_sec: number;
+  max_candidates: number;
+  scoring_weights: Record<string, number>;
+  caption_behavior: string;
+  export_mode: "center_blur_fill" | "vertical_9_16" | "source_aspect";
+  caption_base_color: string;
+  caption_active_word_color: string;
+  caption_vertical_position: "lower" | "lower_middle" | "center";
+  caption_max_lines: number;
+  caption_max_words_per_line: number;
+  blur_intensity: number;
+}
+
+export interface ClipStyleDraft {
+  stylePreset: ClipStylePresetId;
+  hook: {
+    hookText: string;
+    fontSize: number;
+    topOffset: number;
+    boxWidth: number;
+    boxPadding: number;
+    maxLines: number;
+    textAlignment: ClipHookTextAlignment;
+    backgroundStyle: ClipHookBackgroundStyle;
+  };
+  captions: {
+    baseColor: string;
+    activeWordColor: string;
+    fontFamily: string;
+    fontSize: number;
+    displayMode: CaptionDisplayMode;
+    verticalPosition: "lower" | "lower_middle" | "center";
+    bottomOffset: number;
+    maxLines: number;
+    outlineStrength: number;
+    shadowStrength: number;
+  };
+  composition: {
+    blurIntensity: number;
+    foregroundScale: number;
+    foregroundVerticalOffset: number;
+  };
 }
 
 export interface PresetsResponse {
@@ -131,4 +241,58 @@ export interface JobCreateRequest {
   captions_enabled: boolean;
   generate_shorts: boolean;
   user_notes?: string;
+}
+
+export interface SubtitleSegment {
+  start: number;
+  end: number;
+  text: string;
+  words: WordTimestamp[];
+}
+
+export interface WordTimestamp {
+  start: number;
+  end: number;
+  word: string;
+}
+
+export interface CandidateScoreBreakdown {
+  hook_strength: number;
+  self_containedness: number;
+  conflict_tension: number;
+  payoff_clarity: number;
+  novelty_interestingness: number;
+  niche_relevance: number;
+  verbosity_penalty: number;
+  overlap_duplication_penalty: number;
+}
+
+export interface CandidateClip {
+  id: string;
+  start_sec: number;
+  end_sec: number;
+  transcript_excerpt: string;
+  title: string;
+  hook_text: string;
+  rationale: string;
+  score_total: number;
+  score_breakdown: CandidateScoreBreakdown | null;
+  tags: string[];
+  duplicate_group: string | null;
+  subtitle_segments: SubtitleSegment[];
+}
+
+export interface TraceEvent {
+  timestamp: string;
+  stage: string;
+  event: string;
+  message: string;
+  severity: "debug" | "info" | "warning" | "error";
+  payload?: Record<string, unknown> | null;
+}
+
+export interface JobTraceResponse {
+  job_id: string;
+  events: TraceEvent[];
+  artifacts: Record<string, string>;
 }

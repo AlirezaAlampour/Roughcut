@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import get_settings
 from app.db import init_db, connection
-from app.schemas import JobResult
+from app.schemas import CandidateClip, CandidateManifest, JobResult, SubtitleSegment
 from app.services.jobs import _write_json
 from app.services import repository, storage
 from app.utils.serialization import make_json_safe
@@ -183,6 +183,37 @@ class ManifestSerializationTests(unittest.TestCase):
         self.assertEqual(payload["result"]["output_file_ids"], ["render-1"])
         self.assertEqual(payload["artifact"]["path"], "/tmp/output.mp4")
         self.assertEqual(payload["artifact"]["mode"], "ready")
+
+    def test_jobs_write_json_serializes_candidate_manifest(self) -> None:
+        output_path = Path(self.temp_dir.name) / "candidates.json"
+        candidate = CandidateClip(
+            id="clip-001",
+            start_sec=12.0,
+            end_sec=42.0,
+            transcript_excerpt="A compact local AI lesson.",
+            title="The Local AI Lesson",
+            hook_text="Local AI only works when the workflow is boring.",
+            rationale="Strong hook and clear technical payoff.",
+            score_total=88.0,
+            tags=["local-ai"],
+            subtitle_segments=[SubtitleSegment(start=0, end=3, text="A compact local AI lesson.")],
+        )
+        manifest = CandidateManifest(
+            source_file="source.mp4",
+            preset="Local AI Experiment",
+            source_duration=120.0,
+            target_clip_min_sec=20.0,
+            target_clip_max_sec=90.0,
+            candidates=[candidate],
+            notes_for_user=["Generated and ranked 1 shorts candidates."],
+        )
+
+        _write_json(output_path, manifest.model_dump())
+
+        payload = json.loads(output_path.read_text())
+        self.assertEqual(payload["candidates"][0]["id"], "clip-001")
+        self.assertEqual(payload["candidates"][0]["subtitle_segments"][0]["text"], "A compact local AI lesson.")
+        self.assertEqual(payload["notes_for_user"], ["Generated and ranked 1 shorts candidates."])
 
 
 if __name__ == "__main__":

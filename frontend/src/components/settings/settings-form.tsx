@@ -42,7 +42,8 @@ export function SettingsForm({
         default_preset: values.default_preset,
         cut_aggressiveness: values.cut_aggressiveness,
         captions_enabled: values.captions_enabled,
-        output_quality_preset: values.output_quality_preset
+        output_quality_preset: values.output_quality_preset,
+        enable_detailed_planner_logging: values.enable_detailed_planner_logging
       };
       const updated = await api.updateSettings(payload);
       setValues(updated);
@@ -60,7 +61,7 @@ export function SettingsForm({
       <CardHeader>
         <CardTitle className="text-2xl">Settings</CardTitle>
         <CardDescription>
-          Keep this short. The only things that really matter in v1 are where the planner lives and how aggressively the pipeline should cut.
+          Keep this short. The v1 controls are the planner endpoint, shorts preset, candidate density, caption default, and render quality.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -99,7 +100,7 @@ export function SettingsForm({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Default cut aggressiveness</Label>
+            <Label>Default candidate density</Label>
             <Select
               value={values.cut_aggressiveness}
               onValueChange={(value) => update("cut_aggressiveness", value as SettingsResponse["cut_aggressiveness"])}
@@ -108,9 +109,9 @@ export function SettingsForm({
                 <SelectValue placeholder="Choose pacing" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="conservative">Conservative</SelectItem>
+                <SelectItem value="conservative">Fewer, longer</SelectItem>
                 <SelectItem value="balanced">Balanced</SelectItem>
-                <SelectItem value="aggressive">Aggressive</SelectItem>
+                <SelectItem value="aggressive">More, tighter</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -135,7 +136,7 @@ export function SettingsForm({
               <div>
                 <Label>Captions on by default</Label>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  This toggles burned-in captions for new jobs. Transcript and SRT exports remain available.
+                  This toggles burned-in captions for candidate exports. SRT and VTT files remain available.
                 </p>
               </div>
               <Switch checked={values.captions_enabled} onCheckedChange={(checked) => update("captions_enabled", checked)} />
@@ -153,6 +154,20 @@ export function SettingsForm({
             <div className="space-y-2">
               <Label>Transcription model</Label>
               <Input value={values.transcription_model} readOnly />
+            </div>
+            <div className="rounded-[22px] border border-border/70 bg-card/70 p-4 lg:col-span-2">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <Label>Detailed planner logging</Label>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Saves planner prompts and responses next to the structured trace for local debugging.
+                  </p>
+                </div>
+                <Switch
+                  checked={values.enable_detailed_planner_logging}
+                  onCheckedChange={(checked) => update("enable_detailed_planner_logging", checked)}
+                />
+              </div>
             </div>
           </div>
         </details>

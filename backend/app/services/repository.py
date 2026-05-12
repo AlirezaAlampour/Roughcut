@@ -115,6 +115,17 @@ def _serialize_job(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _serialize_clip_style(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "project_id": row["project_id"],
+        "source_candidate_job_id": row["source_candidate_job_id"],
+        "candidate_id": row["candidate_id"],
+        "style_overrides": _json_loads(row["style_json"]) if row["style_json"] else None,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def _touch_project(conn: sqlite3.Connection, project_id: str) -> None:
     conn.execute(
         "UPDATE projects SET updated_at = ? WHERE id = ?",
@@ -143,6 +154,7 @@ def get_project(conn: sqlite3.Connection, project_id: str) -> dict[str, Any] | N
     return {
         "id": row["id"],
         "name": row["name"],
+        "clip_style_defaults": _json_loads(row["clip_style_defaults_json"]) if row["clip_style_defaults_json"] else None,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "status_summary": _status_summary_for_project(conn, row["id"]),
@@ -278,6 +290,109 @@ def list_project_jobs(conn: sqlite3.Connection, project_id: str) -> list[dict[st
     return [_serialize_job(row) for row in rows]
 
 
+def list_project_clip_styles(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM clip_styles
+        WHERE project_id = ?
+        ORDER BY updated_at DESC, created_at DESC
+        """,
+        (project_id,),
+    ).fetchall()
+    return [_serialize_clip_style(row) for row in rows]
+
+
+def get_project_clip_style(
+    conn: sqlite3.Connection,
+    project_id: str,
+    source_candidate_job_id: str,
+    candidate_id: str,
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM clip_styles
+        WHERE project_id = ? AND source_candidate_job_id = ? AND candidate_id = ?
+        """,
+        (project_id, source_candidate_job_id, candidate_id),
+    ).fetchone()
+    return _serialize_clip_style(row) if row else None
+
+
+def save_project_clip_style(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    source_candidate_job_id: str,
+    candidate_id: str,
+    style_overrides: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    current = get_project_clip_style(conn, project_id, source_candidate_job_id, candidate_id)
+    if style_overrides is None:
+        if current is not None:
+            conn.execute(
+                """
+                DELETE FROM clip_styles
+                WHERE project_id = ? AND source_candidate_job_id = ? AND candidate_id = ?
+                """,
+                (project_id, source_candidate_job_id, candidate_id),
+            )
+            _touch_project(conn, project_id)
+        return None
+
+    now = utc_now()
+    conn.execute(
+        """
+        INSERT INTO clip_styles (
+            project_id, source_candidate_job_id, candidate_id, style_json, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, source_candidate_job_id, candidate_id) DO UPDATE SET
+            style_json = excluded.style_json,
+            updated_at = excluded.updated_at
+        """,
+        (
+            project_id,
+            source_candidate_job_id,
+            candidate_id,
+            _json_dumps(style_overrides),
+            current["created_at"] if current is not None else now,
+            now,
+        ),
+    )
+    _touch_project(conn, project_id)
+    return get_project_clip_style(conn, project_id, source_candidate_job_id, candidate_id)
+
+
+def get_project_clip_style_defaults(conn: sqlite3.Connection, project_id: str) -> dict[str, Any] | None:
+    project = get_project(conn, project_id)
+    if project is None:
+        return None
+    return {
+        "project_id": project_id,
+        "style_overrides": project.get("clip_style_defaults"),
+        "updated_at": project["updated_at"],
+    }
+
+
+def save_project_clip_style_defaults(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    style_overrides: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if get_project(conn, project_id) is None:
+        return None
+
+    now = utc_now()
+    conn.execute(
+        "UPDATE projects SET clip_style_defaults_json = ?, updated_at = ? WHERE id = ?",
+        (_json_dumps(style_overrides) if style_overrides is not None else None, now, project_id),
+    )
+    return get_project_clip_style_defaults(conn, project_id)
+
+
 def get_job(conn: sqlite3.Connection, job_id: str) -> dict[str, Any] | None:
     row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     return _serialize_job(row) if row else None
@@ -294,6 +409,7 @@ def create_job(
     generate_shorts: bool,
     user_notes: str | None,
     payload: dict[str, Any],
+    kind: str = "shorts_candidate_generation",
 ) -> dict[str, Any]:
     now = utc_now()
     job_id = uuid.uuid4().hex
@@ -304,12 +420,13 @@ def create_job(
             captions_enabled, generate_shorts, user_notes, current_step, progress_message,
             progress_percent, payload_json, created_at, updated_at
         )
-        VALUES (?, ?, ?, 'rough_cut', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             job_id,
             project_id,
             source_file_id,
+            kind,
             preset_id,
             aggressiveness,
             int(captions_enabled),
@@ -396,7 +513,7 @@ def complete_job(conn: sqlite3.Connection, job_id: str, result: dict[str, Any]) 
         UPDATE jobs
         SET status = 'completed',
             current_step = 'completed',
-            progress_message = 'Rough cut complete.',
+            progress_message = 'Job complete.',
             progress_percent = 100,
             result_json = ?,
             finished_at = ?,
@@ -418,7 +535,7 @@ def fail_job(conn: sqlite3.Connection, job_id: str, error_message: str) -> dict[
         UPDATE jobs
         SET status = 'failed',
             current_step = 'failed',
-            progress_message = 'Rough cut failed.',
+            progress_message = 'Job failed.',
             error_message = ?,
             finished_at = ?,
             updated_at = ?
@@ -457,6 +574,7 @@ def project_manifest_payload(conn: sqlite3.Connection, project_id: str) -> dict[
         **project,
         "files": list_project_files(conn, project_id),
         "jobs": list_project_jobs(conn, project_id),
+        "clip_styles": list_project_clip_styles(conn, project_id),
     }
 
 
@@ -467,6 +585,7 @@ DEFAULT_SETTINGS = (
     "cut_aggressiveness",
     "captions_enabled",
     "output_quality_preset",
+    "enable_detailed_planner_logging",
 )
 
 
@@ -478,10 +597,12 @@ def get_effective_settings(conn: sqlite3.Connection, settings: Settings) -> dict
         "cut_aggressiveness": settings.default_cut_aggressiveness,
         "captions_enabled": settings.default_captions_enabled,
         "output_quality_preset": settings.default_output_quality_preset,
+        "enable_detailed_planner_logging": settings.enable_detailed_planner_logging,
         "project_storage_root": str(settings.storage_root),
         "transcription_model": settings.whisper_model,
     }
-    rows = conn.execute("SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?)", DEFAULT_SETTINGS).fetchall()
+    placeholders = ", ".join("?" for _ in DEFAULT_SETTINGS)
+    rows = conn.execute(f"SELECT key, value FROM settings WHERE key IN ({placeholders})", DEFAULT_SETTINGS).fetchall()
     for row in rows:
         defaults[row["key"]] = _json_loads(row["value"])
     return defaults

@@ -1,10 +1,14 @@
 import type {
   JobCreateRequest,
+  ClipStyleOverrides,
   JobSummary,
+  JobTraceResponse,
+  ProjectClipStyle,
   PresetsResponse,
   ProjectDetail,
   ProjectSummary,
   SettingsResponse,
+  SubtitleSegment,
   SettingsUpdateRequest,
   UploadResponse
 } from "@/lib/types";
@@ -126,8 +130,43 @@ export const api = {
       body: JSON.stringify(payload)
     });
   },
+  exportCandidate(
+    projectId: string,
+    jobId: string,
+    candidateId: string,
+    captionsEnabled?: boolean,
+    styleOverrides?: ClipStyleOverrides,
+    subtitleSegments?: SubtitleSegment[]
+  ) {
+    return request<JobSummary>(`/api/projects/${projectId}/jobs/${jobId}/candidates/${candidateId}/export`, {
+      method: "POST",
+      body: JSON.stringify({
+        captions_enabled: captionsEnabled,
+        style_overrides: styleOverrides,
+        subtitle_segments: subtitleSegments
+      })
+    });
+  },
+  saveClipStyle(projectId: string, jobId: string, candidateId: string, styleOverrides?: ClipStyleOverrides) {
+    return request<ProjectClipStyle | null>(`/api/projects/${projectId}/jobs/${jobId}/candidates/${candidateId}/style`, {
+      method: "PUT",
+      body: JSON.stringify({ style_overrides: styleOverrides })
+    });
+  },
+  saveProjectClipStyleDefaults(projectId: string, styleOverrides?: ClipStyleOverrides) {
+    return request<{ project_id: string; style_overrides: ClipStyleOverrides | null; updated_at: string | null } | null>(
+      `/api/projects/${projectId}/clip-style-defaults`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ style_overrides: styleOverrides })
+      }
+    );
+  },
   getJob(jobId: string) {
     return request<JobSummary>(`/api/jobs/${jobId}`);
+  },
+  getJobTrace(jobId: string) {
+    return request<JobTraceResponse>(`/api/jobs/${jobId}/trace`);
   },
   cancelJob(jobId: string) {
     return request<JobSummary>(`/api/jobs/${jobId}/cancel`, {
@@ -136,4 +175,3 @@ export const api = {
     });
   }
 };
-

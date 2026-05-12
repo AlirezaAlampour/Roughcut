@@ -1,18 +1,15 @@
 # Roughcut Backend
 
-FastAPI and worker services for the local-first AI rough-cut editor.
+FastAPI and worker services for Roughcut's local-first shorts candidate pipeline.
 
-*** Add File: /home/xxfactionsxx/video-agent/backend/app/services/__init__.py
-from app.services import jobs, llm, media, planner, presets, repository, storage, transcription
+The backend keeps the small v1 architecture:
 
-__all__ = [
-    "jobs",
-    "llm",
-    "media",
-    "planner",
-    "presets",
-    "repository",
-    "storage",
-    "transcription",
-]
+- FastAPI REST API
+- SQLite project/file/job/settings state
+- polling worker, no queue broker
+- faster-whisper transcription
+- planner-only LLM calls with OpenAI-compatible and Ollama-native endpoint support
+- deterministic ffmpeg rendering for selected candidates
+- per-job `trace.jsonl` activity logs plus planner prompt/response and render command artifacts
 
+For Dockerized Mac setups, point `VIDEO_AGENT_DEFAULT_LLM_BASE_URL` at `http://host.docker.internal:11434` or an equivalent `/v1` base URL. Roughcut will probe both route families and keep the planner boundary unchanged.

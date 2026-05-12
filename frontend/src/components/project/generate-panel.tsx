@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { WandSparkles } from "lucide-react";
+import { ChevronDown, WandSparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { Aggressiveness, FileItem, JobCreateRequest, PresetConfig } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface GeneratePanelProps {
   uploads: FileItem[];
@@ -20,6 +20,7 @@ interface GeneratePanelProps {
   defaultCaptions?: boolean;
   busy?: boolean;
   onSubmit: (payload: JobCreateRequest) => Promise<void> | void;
+  className?: string;
 }
 
 export function GeneratePanel({
@@ -29,13 +30,14 @@ export function GeneratePanel({
   defaultAggressiveness = "balanced",
   defaultCaptions = true,
   busy = false,
-  onSubmit
+  onSubmit,
+  className
 }: GeneratePanelProps) {
   const [sourceFileId, setSourceFileId] = useState("");
   const [presetId, setPresetId] = useState(defaultPreset || "");
   const [aggressiveness, setAggressiveness] = useState<Aggressiveness>(defaultAggressiveness);
   const [captionsEnabled, setCaptionsEnabled] = useState(defaultCaptions);
-  const [generateShorts, setGenerateShorts] = useState(false);
+  const [generateShorts, setGenerateShorts] = useState(true);
   const [userNotes, setUserNotes] = useState("");
 
   useEffect(() => {
@@ -53,18 +55,18 @@ export function GeneratePanel({
   const activePreset = presets.find((preset) => preset.id === presetId);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-xl">Generate rough cut</CardTitle>
+    <Card className={cn("overflow-hidden", className)}>
+      <CardHeader className="pb-4">
+        <CardTitle className="text-lg">Generate shorts candidates</CardTitle>
         <CardDescription>
-          Keep the planning surface tight. Pick a source, choose a preset, add optional nuance, then run.
+          Pick a source, choose a shorts preset, and let the local planner rank compact candidate clips.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label>Source media</Label>
           <Select value={sourceFileId} onValueChange={setSourceFileId}>
-            <SelectTrigger>
+            <SelectTrigger className="h-10">
               <SelectValue placeholder="Choose a source file" />
             </SelectTrigger>
             <SelectContent>
@@ -80,7 +82,7 @@ export function GeneratePanel({
         <div className="space-y-2">
           <Label>Preset</Label>
           <Select value={presetId} onValueChange={setPresetId}>
-            <SelectTrigger>
+            <SelectTrigger className="h-10">
               <SelectValue placeholder="Choose a preset" />
             </SelectTrigger>
             <SelectContent>
@@ -92,53 +94,72 @@ export function GeneratePanel({
             </SelectContent>
           </Select>
           {activePreset ? (
-            <p className="text-sm leading-6 text-muted-foreground">{activePreset.description}</p>
+            <p className="line-clamp-2 text-sm leading-5 text-muted-foreground">
+              {activePreset.description} Targets {activePreset.target_clip_min_sec}-{activePreset.target_clip_max_sec}s.
+            </p>
           ) : null}
         </div>
 
         <div className="space-y-2">
-          <Label>Aggressiveness</Label>
+          <Label>Candidate density</Label>
           <Select value={aggressiveness} onValueChange={(value) => setAggressiveness(value as Aggressiveness)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select pacing" />
+            <SelectTrigger className="h-10">
+              <SelectValue placeholder="Select density" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="conservative">Conservative</SelectItem>
+              <SelectItem value="conservative">Fewer, longer</SelectItem>
               <SelectItem value="balanced">Balanced</SelectItem>
-              <SelectItem value="aggressive">Aggressive</SelectItem>
+              <SelectItem value="aggressive">More, tighter</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
-        <div className="grid gap-4 rounded-[26px] bg-muted/80 p-4">
-          <div className="flex items-center justify-between gap-4">
+        <details className="group rounded-[22px] border border-border/70 bg-card/70 p-4">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
             <div>
-              <Label>Burn captions into output</Label>
-              <p className="mt-1 text-sm text-muted-foreground">Transcript and SRT are still exported either way.</p>
+              <p className="text-sm font-medium text-foreground">Advanced Settings</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Fine-tune output behavior and planner guidance when you need more control.
+              </p>
             </div>
-            <Switch checked={captionsEnabled} onCheckedChange={setCaptionsEnabled} />
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Label>Suggest shorts candidates</Label>
-              <p className="mt-1 text-sm text-muted-foreground">Ask the planner to mark strong clip ideas in the plan.</p>
-            </div>
-            <Switch checked={generateShorts} onCheckedChange={setGenerateShorts} />
-          </div>
-        </div>
+            <ChevronDown className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+          </summary>
 
-        <div className="space-y-2">
-          <Label>Notes for the planner</Label>
-          <Textarea
-            placeholder="Examples: keep pauses natural, preserve humor, tighter pacing, protect the CTA."
-            value={userNotes}
-            onChange={(event) => setUserNotes(event.target.value)}
-          />
-        </div>
+          <div className="mt-4 space-y-4">
+            <div className="flex items-center justify-between gap-4 rounded-[18px] bg-muted/80 px-3.5 py-3">
+              <div>
+                <Label>Burn captions into output</Label>
+                <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                  Candidate exports still include SRT and VTT when available.
+                </p>
+              </div>
+              <Switch checked={captionsEnabled} onCheckedChange={setCaptionsEnabled} />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-[18px] bg-muted/80 px-3.5 py-3">
+              <div>
+                <Label>Generate ranked shorts</Label>
+                <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                  Turn this off to run the planner without producing shorts candidates.
+                </p>
+              </div>
+              <Switch checked={generateShorts} onCheckedChange={setGenerateShorts} />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Planner notes (optional)</Label>
+              <Textarea
+                className="min-h-[110px] resize-none"
+                placeholder="Examples: favor local AI lessons, avoid salesy CTAs, prefer blunt technical takes."
+                value={userNotes}
+                onChange={(event) => setUserNotes(event.target.value)}
+              />
+            </div>
+          </div>
+        </details>
 
         <Button
-          size="lg"
-          className="w-full"
+          className="h-10 w-full"
           disabled={busy || !sourceFileId || !presetId || uploads.length === 0}
           onClick={() =>
             onSubmit({
@@ -152,10 +173,9 @@ export function GeneratePanel({
           }
         >
           <WandSparkles className="mr-2 size-4" />
-          {busy ? "Generating..." : "Generate rough cut"}
+          {busy ? "Generating..." : "Generate Shorts Candidates"}
         </Button>
       </CardContent>
     </Card>
   );
 }
-

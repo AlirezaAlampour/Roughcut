@@ -4,10 +4,9 @@ export function Skeleton({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "animate-shimmer rounded-2xl bg-[linear-gradient(110deg,rgba(229,223,213,0.7),rgba(255,255,255,0.92),rgba(229,223,213,0.7))] bg-[length:200%_100%]",
+        "animate-shimmer rounded-2xl bg-[linear-gradient(110deg,hsl(var(--muted))_25%,hsl(var(--card))_50%,hsl(var(--muted))_75%)] bg-[length:200%_100%]",
         className
       )}
     />
   );
 }
-

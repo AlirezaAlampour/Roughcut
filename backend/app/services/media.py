@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from fractions import Fraction
 import json
+import math
 from pathlib import Path
+import re
+import shlex
 import subprocess
+import tempfile
+import textwrap
 from typing import Any
 
 from app.config import Settings
-from app.schemas import EditRange, SubtitleSegment, TranscriptSegment
+from app.schemas import EditRange, SubtitleSegment, TranscriptSegment, WordTimestamp
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -94,6 +99,36 @@ def _format_srt_timestamp(value: float) -> str:
     return f"{hours:02}:{minutes:02}:{seconds:02},{milliseconds:03}"
 
 
+def _format_vtt_timestamp(value: float) -> str:
+    return _format_srt_timestamp(value).replace(",", ".")
+
+
+def _remap_words_to_range(
+    words: list[WordTimestamp],
+    *,
+    range_start: float,
+    range_end: float,
+    output_offset: float,
+) -> list[WordTimestamp]:
+    remapped: list[WordTimestamp] = []
+    for word in words:
+        text = word.word.strip()
+        if not text:
+            continue
+        overlap_start = max(float(word.start), range_start)
+        overlap_end = min(float(word.end), range_end)
+        if overlap_end <= overlap_start:
+            continue
+        remapped.append(
+            WordTimestamp(
+                start=round(overlap_start + output_offset, 3),
+                end=round(overlap_end + output_offset, 3),
+                word=text,
+            )
+        )
+    return remapped
+
+
 def remap_segments_to_keep_ranges(
     segments: list[TranscriptSegment], keep_ranges: list[EditRange]
 ) -> list[SubtitleSegment]:
@@ -116,9 +151,45 @@ def remap_segments_to_keep_ranges(
                     start=round(mapped_start, 3),
                     end=round(mapped_end, 3),
                     text=text,
+                    words=_remap_words_to_range(
+                        segment.words,
+                        range_start=keep_range.start,
+                        range_end=keep_range.end,
+                        output_offset=output_cursor - keep_range.start,
+                    ),
                 )
             )
         output_cursor += keep_duration
+    return remapped
+
+
+def remap_segments_to_time_range(
+    segments: list[TranscriptSegment],
+    start_sec: float,
+    end_sec: float,
+) -> list[SubtitleSegment]:
+    remapped: list[SubtitleSegment] = []
+    for segment in segments:
+        text = segment.text.strip()
+        if not text:
+            continue
+        overlap_start = max(segment.start, start_sec)
+        overlap_end = min(segment.end, end_sec)
+        if overlap_end <= overlap_start:
+            continue
+        remapped.append(
+            SubtitleSegment(
+                start=round(overlap_start - start_sec, 3),
+                end=round(overlap_end - start_sec, 3),
+                text=text,
+                words=_remap_words_to_range(
+                    segment.words,
+                    range_start=start_sec,
+                    range_end=end_sec,
+                    output_offset=-start_sec,
+                ),
+            )
+        )
     return remapped
 
 
@@ -135,6 +206,271 @@ def write_srt(path: Path, segments: list[SubtitleSegment]) -> None:
             )
         )
     path.write_text("\n\n".join(blocks))
+
+
+def write_vtt(path: Path, segments: list[SubtitleSegment]) -> None:
+    blocks = ["WEBVTT"]
+    for index, segment in enumerate(segments, start=1):
+        blocks.append(
+            "\n".join(
+                [
+                    str(index),
+                    f"{_format_vtt_timestamp(segment.start)} --> {_format_vtt_timestamp(segment.end)}",
+                    segment.text.strip(),
+                ]
+            )
+        )
+    path.write_text("\n\n".join(blocks) + "\n")
+
+
+def _format_ass_timestamp(value: float) -> str:
+    total_cs = int(round(max(value, 0) * 100))
+    hours = total_cs // 360_000
+    minutes = (total_cs % 360_000) // 6_000
+    seconds = (total_cs % 6_000) // 100
+    centiseconds = total_cs % 100
+    return f"{hours}:{minutes:02}:{seconds:02}.{centiseconds:02}"
+
+
+def _ass_color(hex_color: str, fallback: str) -> str:
+    value = (hex_color or fallback).strip()
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
+        value = fallback
+    red = value[1:3]
+    green = value[3:5]
+    blue = value[5:7]
+    return f"&H00{blue}{green}{red}&".upper()
+
+
+def _escape_ass_text(value: str) -> str:
+    return value.replace("{", "(").replace("}", ")").replace("\n", " ").strip()
+
+
+def _derived_words_for_segment(segment: SubtitleSegment) -> list[WordTimestamp]:
+    usable_words = [
+        WordTimestamp(start=max(segment.start, word.start), end=min(segment.end, word.end), word=word.word.strip())
+        for word in segment.words
+        if word.word.strip() and min(segment.end, word.end) > max(segment.start, word.start)
+    ]
+    if usable_words:
+        return usable_words
+
+    tokens = re.findall(r"\S+", segment.text.strip())
+    if not tokens:
+        return []
+    duration = max(0.2, segment.end - segment.start)
+    step = duration / len(tokens)
+    return [
+        WordTimestamp(
+            start=round(segment.start + index * step, 3),
+            end=round(segment.start + (index + 1) * step, 3),
+            word=token,
+        )
+        for index, token in enumerate(tokens)
+    ]
+
+
+def _caption_word_groups(
+    words: list[WordTimestamp],
+    *,
+    max_lines: int,
+    max_words_per_line: int,
+) -> list[list[WordTimestamp]]:
+    max_words = max(2, max_lines * max_words_per_line)
+    max_chars = max(22, max_lines * 24)
+    groups: list[list[WordTimestamp]] = []
+    current: list[WordTimestamp] = []
+
+    for word in words:
+        text = word.word.strip()
+        if not text:
+            continue
+        current_chars = len(" ".join(item.word for item in current))
+        would_exceed_words = len(current) >= max_words
+        would_exceed_chars = current_chars + len(text) + 1 > max_chars
+        has_pause = bool(current and word.start - current[-1].end > 0.65)
+        too_long = bool(current and word.end - current[0].start > 3.2)
+        if current and (would_exceed_words or would_exceed_chars or has_pause or too_long):
+            groups.append(current)
+            current = []
+        current.append(word)
+
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _caption_group_lines(
+    group: list[WordTimestamp],
+    *,
+    active_index: int | None,
+    base_color: str,
+    active_color: str,
+    max_lines: int,
+    max_words_per_line: int,
+) -> str:
+    rendered: list[str] = []
+    for index, word in enumerate(group):
+        token = _escape_ass_text(word.word)
+        if active_index is not None and index == active_index:
+            token = f"{{\\c{active_color}\\b1}}{token}{{\\c{base_color}\\b1}}"
+        rendered.append(token)
+
+    if max_lines <= 1 or len(rendered) <= max_words_per_line:
+        return " ".join(rendered)
+
+    line_count = min(max_lines, max(1, math.ceil(len(rendered) / max_words_per_line)))
+    line_ranges: list[tuple[int, int]] = []
+    cursor = 0
+    words_remaining = len(rendered)
+    lines_remaining = line_count
+
+    while cursor < len(rendered):
+        take = min(max_words_per_line, max(1, math.ceil(words_remaining / max(lines_remaining, 1))))
+        next_cursor = min(len(rendered), cursor + take)
+        line_ranges.append((cursor, next_cursor))
+        words_remaining -= next_cursor - cursor
+        lines_remaining -= 1
+        cursor = next_cursor
+
+    return r"\N".join(" ".join(rendered[start:end]) for start, end in line_ranges if start < end)
+
+
+def _default_caption_margin_v(vertical_position: str) -> int:
+    if vertical_position == "center":
+        return 720
+    if vertical_position == "lower_middle":
+        return 420
+    return 300
+
+
+def _resolved_ass_font_name(font_family: str | None) -> str:
+    normalized = (font_family or "").strip()
+    if normalized == "Montserrat":
+        return "Montserrat"
+    if normalized == "Impact":
+        return "Impact"
+    if normalized == "Bangers":
+        return "Bangers"
+    return "Arial"
+
+
+def write_ass_karaoke(
+    path: Path,
+    segments: list[SubtitleSegment],
+    *,
+    base_color: str = "#FFFFFF",
+    active_word_color: str = "#FFE15D",
+    font_family: str = "system-ui",
+    font_size: int = 78,
+    display_mode: str = "karaoke",
+    vertical_position: str = "lower",
+    bottom_offset: int | None = None,
+    max_lines: int = 2,
+    max_words_per_line: int = 4,
+    outline_strength: float = 5,
+    shadow_strength: float = 2,
+) -> None:
+    base_ass_color = _ass_color(base_color, "#FFFFFF")
+    active_ass_color = _ass_color(active_word_color, "#FFE15D")
+    outline_color = "&H00080808&"
+    margin_v = int(bottom_offset if bottom_offset is not None else _default_caption_margin_v(vertical_position))
+    display_mode = display_mode if display_mode in {"word", "sentence", "karaoke"} else "karaoke"
+    font_name = _resolved_ass_font_name(font_family)
+    font_size = max(36, min(120, int(font_size or 78)))
+    margin_v = max(120, min(760, margin_v))
+    max_lines = max(1, min(3, int(max_lines or 2)))
+    max_words_per_line = max(2, min(6, int(max_words_per_line or 4)))
+    outline_strength = round(max(0.0, min(float(outline_strength or 0), 12.0)), 2)
+    shadow_strength = round(max(0.0, min(float(shadow_strength or 0), 8.0)), 2)
+
+    lines = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        "PlayResX: 1080",
+        "PlayResY: 1920",
+        "WrapStyle: 2",
+        "ScaledBorderAndShadow: yes",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: ShortsDefault,{font_name},{font_size},{base_ass_color},{active_ass_color},{outline_color},&H85000000&,-1,0,0,0,100,100,0,0,1,{outline_strength},{shadow_strength},2,80,80,{margin_v},1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+
+    if display_mode == "sentence":
+        for segment in segments:
+            if segment.end <= segment.start:
+                continue
+            group = _derived_words_for_segment(segment)
+            text = (
+                _caption_group_lines(
+                    group,
+                    active_index=None,
+                    base_color=base_ass_color,
+                    active_color=active_ass_color,
+                    max_lines=max_lines,
+                    max_words_per_line=max_words_per_line,
+                )
+                if group
+                else _escape_ass_text(segment.text)
+            )
+            if text:
+                lines.append(
+                    f"Dialogue: 0,{_format_ass_timestamp(segment.start)},{_format_ass_timestamp(segment.end)},ShortsDefault,,0,0,0,,{{\\an2\\b1}}{text}"
+                )
+        path.write_text("\n".join(lines) + "\n")
+        return
+
+    all_words: list[WordTimestamp] = []
+    for segment in segments:
+        all_words.extend(_derived_words_for_segment(segment))
+    all_words = sorted(
+        [word for word in all_words if word.word.strip() and word.end > word.start],
+        key=lambda word: (word.start, word.end),
+    )
+
+    if not all_words:
+        for segment in segments:
+            text = _escape_ass_text(segment.text)
+            if text and segment.end > segment.start:
+                lines.append(
+                    f"Dialogue: 0,{_format_ass_timestamp(segment.start)},{_format_ass_timestamp(segment.end)},ShortsDefault,,0,0,0,,{{\\an2\\b1}}{text}"
+                )
+        path.write_text("\n".join(lines) + "\n")
+        return
+
+    for group in _caption_word_groups(
+        all_words,
+        max_lines=max_lines,
+        max_words_per_line=max_words_per_line,
+    ):
+        group_start = group[0].start
+        group_end = max(group[-1].end, group_start + 0.2)
+        for index, word in enumerate(group):
+            event_start = max(group_start, word.start)
+            event_end_target = group[index + 1].start if index < len(group) - 1 else group_end
+            if event_end_target <= event_start:
+                event_end_target = word.end
+            event_end = max(event_start + 0.08, min(group_end, event_end_target))
+            if display_mode == "word":
+                dialogue_text = f"{{\\an2\\b1\\fscx105\\fscy105\\c{active_ass_color}}}{_escape_ass_text(word.word)}"
+            else:
+                dialogue_text = "{\\an2\\b1}" + _caption_group_lines(
+                    group,
+                    active_index=index,
+                    base_color=base_ass_color,
+                    active_color=active_ass_color,
+                    max_lines=max_lines,
+                    max_words_per_line=max_words_per_line,
+                )
+            lines.append(
+                f"Dialogue: 0,{_format_ass_timestamp(event_start)},{_format_ass_timestamp(event_end)},ShortsDefault,,0,0,0,,{dialogue_text}"
+            )
+
+    path.write_text("\n".join(lines) + "\n")
 
 
 def artifact_file_has_content(path: Path | None) -> bool:
@@ -159,6 +495,354 @@ def _quality_args(quality_preset: str) -> tuple[str, str]:
     return mapping.get(quality_preset, mapping["balanced"])
 
 
+def _subtitle_filter(captions_path: Path) -> str:
+    if captions_path.suffix.lower() == ".ass":
+        return f"subtitles={captions_path.as_posix()}"
+    return (
+        f"subtitles={captions_path.as_posix()}:"
+        "force_style='FontName=Arial,FontSize=30,Bold=1,PrimaryColour=&H00FFFFFF&,"
+        "OutlineColour=&H00080808&,BorderStyle=1,Outline=5,Shadow=2,"
+        "Alignment=2,MarginV=300'"
+    )
+
+
+def _clamped_blur_sigma(blur_intensity: float) -> float:
+    return round(max(0.0, min(float(blur_intensity or 0), 80.0)), 2)
+
+
+def hook_overlay_text(hook_text: str | None, fallback_text: str | None = None) -> str | None:
+    primary = re.sub(r"\s+", " ", (hook_text or "")).strip()
+    fallback = re.sub(r"\s+", " ", (fallback_text or "")).strip()
+    return primary or fallback or None
+
+
+def _wrap_hook_overlay_text(
+    value: str,
+    *,
+    max_lines: int = 3,
+    max_chars_per_line: int = 18,
+) -> list[str]:
+    normalized = re.sub(r"\s+", " ", value).strip()
+    if not normalized:
+        return []
+
+    lines = textwrap.wrap(
+        normalized,
+        width=max_chars_per_line,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    if len(lines) <= max_lines:
+        return lines
+
+    overflow = " ".join(lines[max_lines - 1 :]).strip()
+    return [*lines[: max_lines - 1], textwrap.shorten(overflow, width=max_chars_per_line + 6, placeholder="...")]
+
+
+def _escape_filter_value(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace(",", "\\,")
+        .replace("'", "\\'")
+    )
+
+
+def _hook_chars_per_line(*, box_width: int | None, font_size: int, box_padding: int) -> int:
+    usable_width = max(240, int((box_width or 620) - box_padding * 2))
+    estimated = usable_width / max(font_size * 0.56, 12)
+    return max(10, min(28, int(estimated)))
+
+
+def _hook_overlay_filter_chain(
+    video_input: str,
+    hook_lines: list[str],
+    hook_text_path: Path | None,
+    *,
+    font_size: int,
+    top_offset: int,
+    box_width: int | None,
+    box_padding: int,
+    text_alignment: str,
+    background_style: str,
+) -> tuple[list[str], str]:
+    if not hook_lines or hook_text_path is None:
+        return [], video_input
+
+    font_size = max(28, min(96, int(font_size or 52)))
+    box_padding = max(12, min(96, int(box_padding or 36)))
+    line_gap = max(4, round(font_size * 0.12))
+    longest_line = max(len(line) for line in hook_lines)
+    resolved_box_width = (
+        max(320, min(860, int(box_width)))
+        if box_width is not None
+        else max(420, min(760, round(box_padding * 4.5 + longest_line * font_size * 0.56)))
+    )
+    box_height = box_padding * 2 + len(hook_lines) * font_size + max(0, len(hook_lines) - 1) * line_gap
+    safe_top_margin = 64
+    safe_bottom_margin = 96
+    box_top = min(max(safe_top_margin, int(top_offset or 132)), max(safe_top_margin, 1920 - box_height - safe_bottom_margin))
+    box_left = f"(w-{resolved_box_width})/2"
+    text_x = "(w-text_w)/2"
+    resolved_background_style = background_style if background_style in {"light", "dark", "transparent"} else "light"
+    if text_alignment == "left":
+        text_x = f"{box_left}+{box_padding}"
+    elif text_alignment == "right":
+        text_x = f"{box_left}+{resolved_box_width}-text_w-{box_padding}"
+
+    box_color = "white@0.97"
+    font_color = "0x101010"
+    shadow_color = "black@0.06"
+    if resolved_background_style == "dark":
+        box_color = "black@0.80"
+        font_color = "white"
+        shadow_color = "black@0.22"
+    elif resolved_background_style == "transparent":
+        box_color = "black@0.0"
+        font_color = "white"
+        shadow_color = "black@0.40"
+
+    filters = [
+        f"{video_input}drawbox=x={box_left}:y={box_top}:w={resolved_box_width}:h={box_height}:color={box_color}:t=fill[hookbox0]"
+    ]
+
+    filters.append(
+        "[hookbox0]drawtext="
+        f"textfile={_escape_filter_value(hook_text_path.as_posix())}:"
+        "reload=0:fix_bounds=1:text_shaping=1:"
+        f"font=Sans:fontcolor={font_color}:"
+        f"fontsize={font_size}:"
+        f"line_spacing={line_gap}:borderw=0:shadowx=0:shadowy=1:shadowcolor={shadow_color}:"
+        f"x={text_x}:y={box_top}+({box_height}-text_h)/2[hookbox1]"
+    )
+
+    return filters, "[hookbox1]"
+
+
+def _vertical_filter_chain(
+    video_input: str,
+    probe: dict[str, Any],
+    *,
+    blur_intensity: float,
+    foreground_scale: float,
+    foreground_vertical_offset: int,
+) -> tuple[list[str], str]:
+    width = float(probe.get("width") or 0)
+    height = float(probe.get("height") or 0)
+    aspect_ratio = width / height if width > 0 and height > 0 else 16 / 9
+    blur_sigma = _clamped_blur_sigma(blur_intensity)
+
+    if aspect_ratio >= 0.75:
+        return (
+            [
+                f"{video_input}scale=1080:1920:force_original_aspect_ratio=increase,"
+                "crop=1080:1920,setsar=1[basev]"
+            ],
+            "[basev]",
+        )
+
+    return (
+        [
+            f"{video_input}split=2[fgsrc][bgsrc]",
+            "[bgsrc]scale=1080:1920:force_original_aspect_ratio=increase,"
+            f"crop=1080:1920,gblur=sigma={blur_sigma},eq=brightness=-0.08[bgv]",
+            "[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"scale=trunc(iw*{foreground_scale}/2)*2:trunc(ih*{foreground_scale}/2)*2,setsar=1[fgv]",
+            f"[bgv][fgv]overlay=(W-w)/2:(H-h)/2+{foreground_vertical_offset}[basev]",
+        ],
+        "[basev]",
+    )
+
+
+def _center_blur_fill_filter_chain(
+    video_input: str,
+    *,
+    blur_intensity: float,
+    foreground_scale: float,
+    foreground_vertical_offset: int,
+) -> tuple[list[str], str]:
+    blur_sigma = _clamped_blur_sigma(blur_intensity)
+    return (
+        [
+            f"{video_input}split=2[fgsrc][bgsrc]",
+            "[bgsrc]scale=1080:1920:force_original_aspect_ratio=increase,"
+            f"crop=1080:1920,gblur=sigma={blur_sigma},eq=brightness=-0.10:saturation=0.88,setsar=1[bgv]",
+            "[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"scale=trunc(iw*{foreground_scale}/2)*2:trunc(ih*{foreground_scale}/2)*2,setsar=1[fgv]",
+            f"[bgv][fgv]overlay=(W-w)/2:(H-h)/2+{foreground_vertical_offset}:format=auto[basev]",
+        ],
+        "[basev]",
+    )
+
+
+def _write_command_artifact(path: Path | None, args: list[str]) -> None:
+    if path is None:
+        return
+    path.write_text(shlex.join(args) + "\n")
+
+
+def render_short_clip(
+    settings: Settings,
+    source_path: Path,
+    output_path: Path,
+    *,
+    start_sec: float,
+    end_sec: float,
+    captions_path: Path | None,
+    probe: dict[str, Any],
+    quality_preset: str,
+    export_mode: str,
+    blur_intensity: float = 30.0,
+    foreground_scale: float = 1.0,
+    foreground_vertical_offset: int = 0,
+    hook_text: str | None = None,
+    hook_font_size: int = 52,
+    hook_top_offset: int = 132,
+    hook_box_width: int | None = None,
+    hook_box_padding: int = 36,
+    hook_max_lines: int = 3,
+    hook_text_alignment: str = "center",
+    hook_background_style: str = "light",
+    command_log_path: Path | None = None,
+) -> None:
+    if end_sec <= start_sec:
+        raise RuntimeError("Candidate export requires end_sec > start_sec.")
+
+    has_video = bool(probe.get("has_video"))
+    has_audio = bool(probe.get("has_audio"))
+    if not has_video and not has_audio:
+        raise RuntimeError("Source file has no renderable audio or video streams.")
+
+    duration = end_sec - start_sec
+    filter_parts: list[str] = []
+    audio_label = None
+    hook_text_path: Path | None = None
+    foreground_scale = round(max(0.8, min(float(foreground_scale or 1.0), 1.3)), 3)
+    foreground_vertical_offset = int(max(-320, min(int(foreground_vertical_offset or 0), 320)))
+
+    try:
+        if has_video:
+            trimmed_video = f"[0:v]trim=start={start_sec}:end={end_sec},setpts=PTS-STARTPTS,"
+            if export_mode == "center_blur_fill":
+                chains, video_label = _center_blur_fill_filter_chain(
+                    trimmed_video,
+                    blur_intensity=blur_intensity,
+                    foreground_scale=foreground_scale,
+                    foreground_vertical_offset=foreground_vertical_offset,
+                )
+                filter_parts.extend(chains)
+            elif export_mode == "vertical_9_16":
+                chains, video_label = _vertical_filter_chain(
+                    trimmed_video,
+                    probe,
+                    blur_intensity=blur_intensity,
+                    foreground_scale=foreground_scale,
+                    foreground_vertical_offset=foreground_vertical_offset,
+                )
+                filter_parts.extend(chains)
+            else:
+                filter_parts.append(f"{trimmed_video}setsar=1[basev]")
+                video_label = "[basev]"
+        else:
+            filter_parts.append(f"color=c=#161616:s=1080x1920:d={duration},format=yuv420p[basev]")
+            video_label = "[basev]"
+
+        if has_audio:
+            filter_parts.append(f"[0:a]atrim=start={start_sec}:end={end_sec},asetpts=PTS-STARTPTS[basea]")
+            audio_label = "[basea]"
+
+        overlay_text = hook_overlay_text(hook_text)
+        if overlay_text:
+            hook_lines = _wrap_hook_overlay_text(
+                overlay_text,
+                max_lines=max(1, min(int(hook_max_lines or 3), 4)),
+                max_chars_per_line=_hook_chars_per_line(
+                    box_width=hook_box_width,
+                    font_size=max(28, min(int(hook_font_size or 52), 96)),
+                    box_padding=max(12, min(int(hook_box_padding or 36), 96)),
+                ),
+            )
+            if hook_lines:
+                handle = tempfile.NamedTemporaryFile("w", suffix="-roughcut-hook.txt", delete=False, encoding="utf-8")
+                handle.write("\n".join(hook_lines))
+                handle.flush()
+                handle.close()
+                hook_text_path = Path(handle.name)
+            hook_filters, video_label = _hook_overlay_filter_chain(
+                video_label,
+                hook_lines,
+                hook_text_path,
+                font_size=hook_font_size,
+                top_offset=hook_top_offset,
+                box_width=hook_box_width,
+                box_padding=hook_box_padding,
+                text_alignment=hook_text_alignment,
+                background_style=hook_background_style,
+            )
+            filter_parts.extend(hook_filters)
+
+        final_video_label = video_label
+        if subtitle_file_is_usable(captions_path):
+            filter_parts.append(f"{video_label}{_subtitle_filter(captions_path)}[vout]")
+            final_video_label = "[vout]"
+
+        preset, crf = _quality_args(quality_preset)
+        args = [
+            settings.ffmpeg_binary,
+            "-y",
+            "-i",
+            str(source_path),
+            "-filter_complex",
+            ";".join(filter_parts),
+            "-map",
+            final_video_label,
+        ]
+        if audio_label is not None:
+            args.extend(["-map", audio_label, "-c:a", "aac", "-b:a", "192k"])
+
+        args.extend(
+            [
+                "-c:v",
+                "libx264",
+                "-preset",
+                preset,
+                "-crf",
+                crf,
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+        )
+        _write_command_artifact(command_log_path, args)
+        _run(args)
+    finally:
+        if hook_text_path is not None:
+            try:
+                hook_text_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def extract_thumbnail(settings: Settings, video_path: Path, output_path: Path, *, offset_seconds: float = 1.0) -> None:
+    _run(
+        [
+            settings.ffmpeg_binary,
+            "-y",
+            "-ss",
+            str(max(0.0, offset_seconds)),
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "2",
+            str(output_path),
+        ]
+    )
+
+
 def render_rough_cut(
     settings: Settings,
     source_path: Path,
@@ -167,6 +851,7 @@ def render_rough_cut(
     captions_path: Path | None,
     probe: dict[str, Any],
     quality_preset: str,
+    command_log_path: Path | None = None,
 ) -> None:
     if not keep_ranges:
         raise RuntimeError("No keep ranges available for rendering.")
@@ -244,4 +929,5 @@ def render_rough_cut(
             str(output_path),
         ]
     )
+    _write_command_artifact(command_log_path, args)
     _run(args)

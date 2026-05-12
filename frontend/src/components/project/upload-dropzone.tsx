@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { CloudUpload, Plus } from "lucide-react";
+import { CloudUpload, Loader2, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,19 +11,34 @@ import { cn } from "@/lib/utils";
 interface UploadDropzoneProps {
   disabled?: boolean;
   uploadProgress: number | null;
+  uploadPhase?: "uploading" | "processing" | null;
   onFilesSelected: (files: File[]) => void;
+  compact?: boolean;
 }
 
-export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelected }: UploadDropzoneProps) {
-  const [dragging, setDragging] = useState(false);
+export function UploadDropzone({
+  disabled = false,
+  uploadProgress,
+  uploadPhase = null,
+  onFilesSelected,
+  compact = false
+}: UploadDropzoneProps) {
+  const [isDragActive, setIsDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
 
   const helperText = useMemo(() => {
+    if (uploadPhase === "processing") {
+      return "Saving upload and refreshing the project library.";
+    }
     if (uploadProgress !== null) {
       return `Uploading ${uploadProgress}%`;
     }
-    return "Drop raw video or audio here, or choose files from your computer.";
-  }, [uploadProgress]);
+    if (compact) {
+      return "Drag and drop your files here, or click to browse.";
+    }
+    return "Drag and drop your files here, or click to browse for a long-form video or audio source.";
+  }, [compact, uploadPhase, uploadProgress]);
 
   function emitFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0 || disabled) {
@@ -32,34 +47,104 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
     onFilesSelected(Array.from(fileList));
   }
 
+  function resetDragState() {
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+  }
+
   return (
     <Card
       className={cn(
-        "border-dashed transition",
-        dragging ? "border-primary/50 bg-accent/30" : "border-border/80 bg-white/80",
-        disabled && "opacity-70"
+        "cursor-pointer border-2 border-dashed transition-colors duration-200 ease-in-out",
+        isDragActive
+          ? "border-[3px] border-primary bg-primary/5"
+          : "border-border/50 bg-zinc-50/50 dark:bg-zinc-900/50",
+        disabled && "cursor-not-allowed opacity-70"
       )}
-      onDragOver={(event) => {
-        event.preventDefault();
-        setDragging(true);
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      onClick={() => {
+        if (!disabled) {
+          inputRef.current?.click();
+        }
       }}
-      onDragLeave={() => setDragging(false)}
+      onKeyDown={(event) => {
+        if (disabled) {
+          return;
+        }
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          inputRef.current?.click();
+        }
+      }}
+      onDragEnter={(event) => {
+        if (disabled) {
+          return;
+        }
+        event.preventDefault();
+        dragDepthRef.current += 1;
+        setIsDragActive(true);
+      }}
+      onDragOver={(event) => {
+        if (disabled) {
+          return;
+        }
+        event.preventDefault();
+        setIsDragActive(true);
+      }}
+      onDragLeave={(event) => {
+        if (disabled) {
+          return;
+        }
+        event.preventDefault();
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+        if (dragDepthRef.current === 0) {
+          setIsDragActive(false);
+        }
+      }}
       onDrop={(event) => {
         event.preventDefault();
-        setDragging(false);
+        resetDragState();
         emitFiles(event.dataTransfer.files);
       }}
     >
-      <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
-        <div className="flex size-14 items-center justify-center rounded-3xl bg-primary/10 text-primary">
-          <CloudUpload className="size-6" />
+      <CardContent className={cn("flex flex-col items-center text-center", compact ? "gap-3 px-4 py-4" : "gap-4 px-6 py-8")}>
+        <div
+          className={cn(
+            "flex items-center justify-center rounded-3xl bg-primary/10 text-primary transition-colors duration-200 ease-in-out",
+            isDragActive && "bg-primary/15",
+            compact ? "size-11" : "size-14"
+          )}
+        >
+          <CloudUpload className={cn(compact ? "size-5" : "size-6")} />
         </div>
-        <div className="space-y-2">
-          <h3 className="text-lg font-medium tracking-tight text-foreground">Upload source media</h3>
-          <p className="max-w-md text-sm leading-6 text-muted-foreground">{helperText}</p>
+        <div className={cn(compact ? "space-y-1" : "space-y-2")}>
+          <h3 className={cn("font-medium tracking-tight text-foreground", compact ? "text-base" : "text-lg")}>
+            Upload source media
+          </h3>
+          <p className={cn("text-muted-foreground", compact ? "max-w-sm text-xs leading-5" : "max-w-md text-sm leading-6")}>
+            {helperText}
+          </p>
         </div>
-        {uploadProgress !== null ? <Progress value={uploadProgress} className="max-w-sm" /> : null}
-        <Button type="button" variant="secondary" disabled={disabled} onClick={() => inputRef.current?.click()}>
+        {uploadPhase === "processing" ? (
+          <div className={cn("flex items-center gap-2 text-sm text-muted-foreground", compact ? "" : "max-w-sm")}>
+            <Loader2 className="size-4 animate-spin" />
+            <span>Finalizing upload</span>
+          </div>
+        ) : uploadProgress !== null ? (
+          <Progress value={uploadProgress} className={cn("w-full", compact ? "" : "max-w-sm")} />
+        ) : null}
+        <Button
+          type="button"
+          variant="secondary"
+          size={compact ? "sm" : "default"}
+          className="h-10"
+          disabled={disabled}
+          onClick={(event) => {
+            event.stopPropagation();
+            inputRef.current?.click();
+          }}
+        >
           <Plus className="mr-2 size-4" />
           Choose files
         </Button>
@@ -69,10 +154,13 @@ export function UploadDropzone({ disabled = false, uploadProgress, onFilesSelect
           multiple
           accept="video/*,audio/*"
           type="file"
-          onChange={(event) => emitFiles(event.target.files)}
+          onChange={(event) => {
+            resetDragState();
+            emitFiles(event.target.files);
+            event.currentTarget.value = "";
+          }}
         />
       </CardContent>
     </Card>
   );
 }
-

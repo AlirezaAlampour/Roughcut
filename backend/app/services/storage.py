@@ -72,11 +72,13 @@ def classify_path(path: Path, mime_type: str | None = None) -> tuple[str, str | 
         return "video", guessed_mime
     if guessed_mime and guessed_mime.startswith("audio/"):
         return "audio", guessed_mime
-    if path.suffix.lower() in {".json"}:
+    if guessed_mime and guessed_mime.startswith("image/"):
+        return "image", guessed_mime
+    if path.suffix.lower() in {".json", ".jsonl"}:
         return "json", guessed_mime or "application/json"
     if path.suffix.lower() in {".txt", ".log"}:
         return "text", guessed_mime or "text/plain"
-    if path.suffix.lower() in {".srt", ".vtt"}:
+    if path.suffix.lower() in {".ass", ".srt", ".vtt"}:
         return "subtitle", guessed_mime or "application/x-subrip"
     return "binary", guessed_mime
 

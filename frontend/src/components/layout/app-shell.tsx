@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Clapperboard, FolderKanban, Settings2 } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { cn } from "@/lib/utils";
 
 const navigation = [
@@ -16,20 +17,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col px-4 pb-6 pt-4 lg:flex-row lg:gap-6 lg:px-6 lg:py-6">
-        <aside className="mb-4 rounded-[32px] border border-border/60 bg-white/80 p-4 shadow-soft backdrop-blur lg:sticky lg:top-6 lg:mb-0 lg:h-[calc(100vh-3rem)] lg:w-[280px] lg:p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lift">
-              <Clapperboard className="size-5" />
-            </div>
-            <div>
-              <p className="font-serif text-2xl tracking-tight">Roughcut</p>
-              <p className="text-sm text-muted-foreground">Local-first editing appliance</p>
-            </div>
-          </div>
+    <div className="min-h-screen bg-background text-foreground lg:h-screen lg:overflow-hidden">
+      <div className="flex min-h-screen w-full min-w-0 items-stretch lg:h-full">
+        <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col items-center border-r border-zinc-900 bg-zinc-950 px-2 py-4 text-zinc-100 shadow-soft">
+          <Link
+            href="/"
+            aria-label="Roughcut home"
+            title="Roughcut home"
+            className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lift transition hover:opacity-95"
+          >
+            <Clapperboard className="size-[18px]" />
+            <span className="sr-only">Roughcut home</span>
+          </Link>
 
-          <nav className="mt-8 flex gap-2 overflow-x-auto lg:flex-col">
+          <nav className="mt-8 flex min-h-0 flex-1 flex-col items-center gap-3 overflow-y-auto">
             {navigation.map((item) => {
               const Icon = item.icon;
               const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
@@ -37,31 +38,35 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-label={item.label}
+                  title={item.label}
                   className={cn(
-                    "flex min-w-fit items-center gap-3 rounded-2xl px-4 py-3 text-sm transition",
+                    "flex size-11 items-center justify-center rounded-2xl text-sm transition",
                     active
                       ? "bg-primary text-primary-foreground shadow-lift"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
                   )}
                 >
                   <Icon className="size-4" />
-                  <span>{item.label}</span>
                 </Link>
               );
             })}
           </nav>
 
-          <div className="mt-8 rounded-[24px] border border-border/70 bg-[linear-gradient(180deg,rgba(245,241,234,0.92),rgba(255,255,255,0.98))] p-4">
-            <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">Local Run</p>
-            <p className="mt-2 text-sm leading-6 text-foreground">
-              Upload from your main PC, process on the DGX Spark, and keep the whole pipeline on your own network.
-            </p>
+          <div className="mt-auto flex w-full justify-center border-t border-zinc-900 pt-3">
+            <ThemeToggle
+              compact
+              className="border-zinc-800 bg-zinc-900/80 text-zinc-100 hover:bg-zinc-800 hover:text-zinc-100"
+            />
           </div>
         </aside>
 
-        <main className="flex-1">{children}</main>
+        <main className="flex min-h-screen min-w-0 flex-1 flex-col overflow-hidden lg:h-full lg:min-h-0">
+          <div className="flex min-h-screen min-w-0 flex-1 flex-col px-4 py-4 lg:min-h-0 lg:px-5 lg:py-5">
+            {children}
+          </div>
+        </main>
       </div>
     </div>
   );
 }
-

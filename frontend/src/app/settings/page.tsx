@@ -32,11 +32,11 @@ export default function SettingsPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <PageHeader
         eyebrow="Configuration"
         title="Keep the setup small."
-        description="Point the backend at your local planner, pick steady defaults, and leave the rest alone until you actually need more control."
+        description="Point the backend at your local planner, pick shorts-oriented defaults, and leave the rest alone until you actually need more control."
       />
 
       {loading ? (

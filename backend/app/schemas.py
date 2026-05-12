@@ -51,10 +51,19 @@ class JobResult(BaseModel):
     transcript_file_id: str | None = None
     subtitle_file_id: str | None = None
     edit_plan_file_id: str | None = None
+    candidate_manifest_file_id: str | None = None
     log_file_id: str | None = None
+    trace_file_id: str | None = None
+    planner_prompt_file_id: str | None = None
+    planner_response_file_id: str | None = None
+    render_command_file_id: str | None = None
     notes_for_user: list[str] = Field(default_factory=list)
     transcript_preview: str | None = None
     plan: dict[str, Any] | None = None
+    candidates: list["CandidateClip"] = Field(default_factory=list)
+    candidate_count: int = 0
+    exported_candidate_id: str | None = None
+    export: dict[str, Any] | None = None
 
 
 class JobSummary(BaseModel):
@@ -93,6 +102,8 @@ class ProjectSummary(BaseModel):
 class ProjectDetail(ProjectSummary):
     files: list[FileItem] = Field(default_factory=list)
     jobs: list[JobSummary] = Field(default_factory=list)
+    clip_style_defaults: "ClipStyleOverrides | None" = None
+    clip_styles: list["ProjectClipStyle"] = Field(default_factory=list)
 
 
 class ProjectCreateRequest(BaseModel):
@@ -140,6 +151,7 @@ class SettingsResponse(BaseModel):
     cut_aggressiveness: Literal["conservative", "balanced", "aggressive"]
     captions_enabled: bool
     output_quality_preset: Literal["draft", "balanced", "quality"]
+    enable_detailed_planner_logging: bool
     project_storage_root: str
     transcription_model: str
 
@@ -153,6 +165,7 @@ class SettingsUpdateRequest(BaseModel):
     cut_aggressiveness: Literal["conservative", "balanced", "aggressive"] | None = None
     captions_enabled: bool | None = None
     output_quality_preset: Literal["draft", "balanced", "quality"] | None = None
+    enable_detailed_planner_logging: bool | None = None
 
 
 class PresetConfig(BaseModel):
@@ -168,6 +181,20 @@ class PresetConfig(BaseModel):
     shorts_behavior: str
     cta_preservation: str
     planner_hint: str
+    target_clip_min_sec: float = 20.0
+    target_clip_max_sec: float = 90.0
+    target_clip_ideal_sec: float = 45.0
+    candidate_overlap_sec: float = 8.0
+    max_candidates: int = 12
+    scoring_weights: dict[str, float] = Field(default_factory=dict)
+    caption_behavior: str = "burned_in_default"
+    export_mode: Literal["center_blur_fill", "vertical_9_16", "source_aspect"] = "center_blur_fill"
+    caption_base_color: str = "#FFFFFF"
+    caption_active_word_color: str = "#FFE15D"
+    caption_vertical_position: Literal["lower", "lower_middle", "center"] = "lower"
+    caption_max_lines: int = 2
+    caption_max_words_per_line: int = 4
+    blur_intensity: float = 30.0
 
 
 class PresetsResponse(BaseModel):
@@ -181,7 +208,7 @@ class JobCreateRequest(BaseModel):
     preset_id: str
     aggressiveness: Literal["conservative", "balanced", "aggressive"] = "balanced"
     captions_enabled: bool = True
-    generate_shorts: bool = False
+    generate_shorts: bool = True
     user_notes: str | None = Field(default=None, max_length=600)
 
 
@@ -220,6 +247,227 @@ class SubtitleSegment(BaseModel):
     start: float
     end: float
     text: str
+    words: list[WordTimestamp] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "SubtitleSegment":
+        if self.end <= self.start:
+            raise ValueError("Subtitle segments must have end > start.")
+        return self
+
+
+class CandidateScoreBreakdown(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hook_strength: float = Field(ge=0, le=10)
+    self_containedness: float = Field(ge=0, le=10)
+    conflict_tension: float = Field(ge=0, le=10)
+    payoff_clarity: float = Field(ge=0, le=10)
+    novelty_interestingness: float = Field(ge=0, le=10)
+    niche_relevance: float = Field(ge=0, le=10)
+    verbosity_penalty: float = Field(ge=0, le=10)
+    overlap_duplication_penalty: float = Field(ge=0, le=10)
+
+
+class CandidateClip(BaseModel):
+    id: str
+    start_sec: float
+    end_sec: float
+    transcript_excerpt: str
+    title: str = ""
+    hook_text: str = ""
+    rationale: str = ""
+    score_total: float = Field(default=0, ge=0, le=100)
+    score_breakdown: CandidateScoreBreakdown | None = None
+    tags: list[str] = Field(default_factory=list)
+    duplicate_group: str | None = None
+    subtitle_segments: list[SubtitleSegment] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "CandidateClip":
+        if self.end_sec <= self.start_sec:
+            raise ValueError("Candidate clips must have end_sec > start_sec.")
+        return self
+
+
+class CandidateScoreItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    score_total: float = Field(ge=0, le=100)
+    score_breakdown: CandidateScoreBreakdown
+    title: str = Field(min_length=1, max_length=120)
+    hook_text: str = Field(min_length=1, max_length=240)
+    rationale: str = Field(min_length=1, max_length=600)
+    tags: list[str] = Field(default_factory=list, max_length=8)
+    duplicate_group: str | None = Field(default=None, max_length=80)
+
+
+class CandidateBatchScoreItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    score_total: float = Field(ge=0, le=100)
+    score_breakdown: CandidateScoreBreakdown
+    tags: list[str] = Field(default_factory=list, max_length=8)
+    duplicate_group: str | None = Field(default=None, max_length=80)
+
+
+class CandidateEnrichmentItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str = Field(min_length=1, max_length=120)
+    hook_text: str = Field(min_length=1, max_length=240)
+    rationale: str = Field(min_length=1, max_length=600)
+
+
+class CandidateScoringResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[CandidateScoreItem]
+
+
+class CandidateBatchScoringResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[CandidateBatchScoreItem]
+
+
+class CandidateEnrichmentResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[CandidateEnrichmentItem]
+
+
+class CandidateManifest(BaseModel):
+    source_file: str
+    preset: str
+    source_duration: float
+    target_clip_min_sec: float
+    target_clip_max_sec: float
+    candidates: list[CandidateClip] = Field(default_factory=list)
+    notes_for_user: list[str] = Field(default_factory=list)
+
+
+ClipStylePreset = Literal["clean", "bold", "aggressive"]
+
+
+class ClipHookStyleOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hook_text: str | None = Field(default=None, max_length=240)
+    font_size: int | None = Field(default=None, ge=28, le=96)
+    top_offset: int | None = Field(default=None, ge=32, le=520)
+    box_width: int | None = Field(default=None, ge=320, le=860)
+    box_padding: int | None = Field(default=None, ge=12, le=96)
+    max_lines: int | None = Field(default=None, ge=1, le=4)
+    text_alignment: Literal["left", "center", "right"] | None = None
+    background_style: Literal["light", "dark", "transparent"] | None = None
+
+    @field_validator("hook_text")
+    @classmethod
+    def normalize_hook_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class ClipCaptionStyleOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_color: str | None = None
+    active_word_color: str | None = None
+    font_family: str | None = None
+    font_size: int | None = Field(default=None, ge=36, le=120)
+    display_mode: Literal["word", "sentence", "karaoke"] | None = None
+    vertical_position: Literal["lower", "lower_middle", "center"] | None = None
+    bottom_offset: int | None = Field(default=None, ge=120, le=760)
+    max_lines: int | None = Field(default=None, ge=1, le=3)
+    outline_strength: float | None = Field(default=None, ge=0, le=12)
+    shadow_strength: float | None = Field(default=None, ge=0, le=8)
+
+    @field_validator("base_color", "active_word_color")
+    @classmethod
+    def validate_color(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if not stripped.startswith("#") or len(stripped) != 7:
+            raise ValueError("Colors must use #RRGGBB format.")
+        return stripped
+
+    @field_validator("font_family")
+    @classmethod
+    def normalize_font_family(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class ClipCompositionStyleOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    blur_intensity: float | None = Field(default=None, ge=0, le=80)
+    foreground_scale: float | None = Field(default=None, ge=0.8, le=1.3)
+    foreground_vertical_offset: int | None = Field(default=None, ge=-320, le=320)
+
+
+class ClipStyleOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    style_preset: ClipStylePreset | None = None
+    hook: ClipHookStyleOverrides | None = None
+    captions: ClipCaptionStyleOverrides | None = None
+    composition: ClipCompositionStyleOverrides | None = None
+
+
+class ProjectClipStyle(BaseModel):
+    project_id: str
+    source_candidate_job_id: str
+    candidate_id: str
+    style_overrides: ClipStyleOverrides
+    created_at: str
+    updated_at: str
+
+
+class ProjectClipStyleDefaults(BaseModel):
+    project_id: str
+    style_overrides: ClipStyleOverrides | None = None
+    updated_at: str | None = None
+
+
+class ClipStyleSaveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    style_overrides: ClipStyleOverrides | None = None
+
+
+class CandidateExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    captions_enabled: bool | None = None
+    style_overrides: ClipStyleOverrides | None = None
+    subtitle_segments: list[SubtitleSegment] | None = None
+
+
+class TraceEvent(BaseModel):
+    timestamp: str
+    stage: str
+    event: str
+    message: str
+    severity: Literal["debug", "info", "warning", "error"] = "info"
+    payload: dict[str, Any] | None = None
+
+
+class JobTraceResponse(BaseModel):
+    job_id: str
+    events: list[TraceEvent] = Field(default_factory=list)
+    artifacts: dict[str, str] = Field(default_factory=dict)
 
 
 class ZoomEvent(BaseModel):

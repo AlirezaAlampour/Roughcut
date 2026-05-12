@@ -17,10 +17,11 @@ class Settings(BaseSettings):
 
     default_llm_base_url: str = ""
     default_llm_model: str = ""
-    default_preset: str = "talking_head_clean"
+    default_preset: str = "tacdel_builder_story"
     default_cut_aggressiveness: str = "balanced"
     default_captions_enabled: bool = True
     default_output_quality_preset: str = "balanced"
+    enable_detailed_planner_logging: bool = True
 
     whisper_model: str = "small"
     whisper_device: str = "cpu"
@@ -31,6 +32,12 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 8192
     worker_poll_interval_seconds: float = 2.0
     llm_request_timeout_seconds: int = 180
+    planner_scoring_batch_size: int = 3
+    planner_scoring_retry_batch_size: int = 1
+    planner_scoring_excerpt_char_limit: int = 360
+    planner_scoring_retry_excerpt_char_limit: int = 220
+    planner_enrichment_top_n: int = 3
+    planner_enrichment_excerpt_char_limit: int = 280
 
     allowed_upload_extensions: tuple[str, ...] = Field(
         default=(
@@ -66,4 +73,3 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.ensure_directories()
     return settings
-

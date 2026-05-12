@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "roughcut-backend"
 version = "0.1.0"
-description = "Local-first AI rough-cut editing backend"
+description = "Local-first AI shorts candidate generation backend"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -20,4 +20,3 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
-

@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    clip_style_defaults_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -61,9 +62,20 @@ CREATE TABLE IF NOT EXISTS jobs (
     finished_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS clip_styles (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    source_candidate_job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    candidate_id TEXT NOT NULL,
+    style_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, source_candidate_job_id, candidate_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_files_project_kind ON files(project_id, kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_project_status ON jobs(project_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_clip_styles_project_job ON clip_styles(project_id, source_candidate_job_id, updated_at DESC);
 """
 
 
@@ -72,6 +84,9 @@ def init_db() -> None:
     settings.ensure_directories()
     with sqlite3.connect(settings.database_path) as conn:
         conn.executescript(SCHEMA_SQL)
+        project_columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()}
+        if "clip_style_defaults_json" not in project_columns:
+            conn.execute("ALTER TABLE projects ADD COLUMN clip_style_defaults_json TEXT")
 
 
 @contextmanager
@@ -90,4 +105,3 @@ def connection() -> Generator[sqlite3.Connection, None, None]:
 def get_db() -> Generator[sqlite3.Connection, None, None]:
     with connection() as conn:
         yield conn
-
