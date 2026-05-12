@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
@@ -23,11 +23,34 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/layout/page-header";
 import { ProjectCard } from "@/components/projects/project-card";
 
+type ProjectCreationMode = "factory" | "quick-caption";
+
+const QUICK_CAPTION_PROJECT_PREFIX = "[Caption]";
+
+function isQuickCaptionProjectName(name: string) {
+  return name.includes(QUICK_CAPTION_PROJECT_PREFIX);
+}
+
+function projectNameForMode(name: string, mode: ProjectCreationMode) {
+  const trimmedName = name.trim();
+  if (mode !== "quick-caption") {
+    return trimmedName;
+  }
+  return isQuickCaptionProjectName(trimmedName)
+    ? trimmedName
+    : `${QUICK_CAPTION_PROJECT_PREFIX} ${trimmedName}`;
+}
+
+function projectNameForInput(name: string) {
+  return isQuickCaptionProjectName(name) ? name.replace(QUICK_CAPTION_PROJECT_PREFIX, "").trimStart() : name;
+}
+
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ProjectCreationMode>("factory");
   const [renameTarget, setRenameTarget] = useState<ProjectSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
 
@@ -55,6 +78,7 @@ export default function ProjectsPage() {
           return;
         }
         event.preventDefault();
+        setCreateMode("factory");
         setCreateOpen(true);
       }
     }
@@ -63,13 +87,18 @@ export default function ProjectsPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  function openCreateDialog(mode: ProjectCreationMode) {
+    setCreateMode(mode);
+    setCreateOpen(true);
+  }
+
   async function handleCreate(name: string) {
     try {
       setBusy(true);
-      const created = await api.createProject(name);
+      const created = await api.createProject(projectNameForMode(name, createMode));
       setProjects((current) => [created, ...current]);
       setCreateOpen(false);
-      toast.success("Project created.");
+      toast.success(createMode === "quick-caption" ? "Quick caption project created." : "Shorts factory project created.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create project.");
     } finally {
@@ -84,7 +113,10 @@ export default function ProjectsPage() {
 
     try {
       setBusy(true);
-      const updated = await api.renameProject(renameTarget.id, name);
+      const updated = await api.renameProject(
+        renameTarget.id,
+        projectNameForMode(name, isQuickCaptionProjectName(renameTarget.name) ? "quick-caption" : "factory")
+      );
       setProjects((current) => current.map((project) => (project.id === updated.id ? updated : project)));
       setRenameTarget(null);
       toast.success("Project renamed.");
@@ -117,13 +149,19 @@ export default function ProjectsPage() {
     <div className="space-y-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1 lg:space-y-7">
       <PageHeader
         eyebrow="Projects"
-        title="Find the shorts hiding in long videos."
-        description="Create a project, upload one long source, let the local planner rank candidate clips, and export vertical shorts with captions."
+        title="Choose the workflow before you start."
+        description="Use Shorts Factory for AI-ranked clips from long videos, or Quick Caption for pre-cut shorts that just need transcription and styling."
         actions={
-          <Button size="lg" onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 size-4" />
-            New project
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="lg" variant="secondary" onClick={() => openCreateDialog("factory")}>
+              <Plus className="mr-2 size-4" />
+              New Shorts Factory Project
+            </Button>
+            <Button size="lg" onClick={() => openCreateDialog("quick-caption")}>
+              <Sparkles className="mr-2 size-4" />
+              New Quick Caption Project
+            </Button>
+          </div>
         }
       />
 
@@ -146,13 +184,19 @@ export default function ProjectsPage() {
               <p className="panel-label">Empty State</p>
               <h2 className="mt-3 font-serif text-3xl tracking-tight text-foreground">Start with one clean project.</h2>
               <p className="mt-4 text-base leading-7 text-muted-foreground">
-                This app stays calm on purpose. Create a project, press <span className="rounded bg-muted px-2 py-1 text-xs">N</span> any time to make another, and keep everything organized around source-to-shorts review flows.
+                Start a Shorts Factory project when you want ranked clips from a long source, or start a Quick Caption project when you already have the short and just need transcript cleanup plus caption styling.
               </p>
             </div>
-            <Button size="lg" onClick={() => setCreateOpen(true)}>
-              <Plus className="mr-2 size-4" />
-              Create project
-            </Button>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button size="lg" variant="secondary" onClick={() => openCreateDialog("factory")}>
+                <Plus className="mr-2 size-4" />
+                New Shorts Factory Project
+              </Button>
+              <Button size="lg" onClick={() => openCreateDialog("quick-caption")}>
+                <Sparkles className="mr-2 size-4" />
+                New Quick Caption Project
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : (
@@ -170,11 +214,20 @@ export default function ProjectsPage() {
 
       <NameDialog
         open={createOpen}
-        onOpenChange={setCreateOpen}
-        title="Create project"
-        description="Projects keep uploads, outputs, and job history together."
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+          if (!open) {
+            setCreateMode("factory");
+          }
+        }}
+        title={createMode === "quick-caption" ? "Create Quick Caption project" : "Create Shorts Factory project"}
+        description={
+          createMode === "quick-caption"
+            ? "Quick Caption projects skip AI clip planning so you can upload a pre-cut short and jump straight into captions."
+            : "Shorts Factory projects keep long-form uploads, ranked candidates, and exports together."
+        }
         label="Project name"
-        submitLabel="Create project"
+        submitLabel={createMode === "quick-caption" ? "Create quick caption project" : "Create shorts factory project"}
         pending={busy}
         onSubmit={handleCreate}
       />
@@ -189,7 +242,7 @@ export default function ProjectsPage() {
         title="Rename project"
         description="Use a clear, human-readable project name. Files stay untouched."
         label="Project name"
-        initialValue={renameTarget?.name}
+        initialValue={renameTarget ? projectNameForInput(renameTarget.name) : undefined}
         submitLabel="Save name"
         pending={busy}
         onSubmit={handleRename}

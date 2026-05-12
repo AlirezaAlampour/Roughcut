@@ -88,6 +88,7 @@ export type ClipStylePresetId = "clean" | "bold" | "aggressive";
 
 export type ClipHookTextAlignment = "left" | "center" | "right";
 export type ClipHookBackgroundStyle = "light" | "dark" | "transparent";
+export type CaptionDisplayMode = "word" | "sentence" | "karaoke";
 
 export interface ClipHookStyleOverrides {
   hook_text?: string;
@@ -103,8 +104,10 @@ export interface ClipHookStyleOverrides {
 export interface ClipCaptionStyleOverrides {
   base_color?: string;
   active_word_color?: string;
+  font_family?: string;
   font_size?: number;
-  vertical_position?: "lower" | "lower_middle";
+  display_mode?: CaptionDisplayMode;
+  vertical_position?: "lower" | "lower_middle" | "center";
   bottom_offset?: number;
   max_lines?: number;
   outline_strength?: number;
@@ -190,7 +193,7 @@ export interface PresetConfig {
   export_mode: "center_blur_fill" | "vertical_9_16" | "source_aspect";
   caption_base_color: string;
   caption_active_word_color: string;
-  caption_vertical_position: "lower" | "lower_middle";
+  caption_vertical_position: "lower" | "lower_middle" | "center";
   caption_max_lines: number;
   caption_max_words_per_line: number;
   blur_intensity: number;
@@ -211,8 +214,10 @@ export interface ClipStyleDraft {
   captions: {
     baseColor: string;
     activeWordColor: string;
+    fontFamily: string;
     fontSize: number;
-    verticalPosition: "lower" | "lower_middle";
+    displayMode: CaptionDisplayMode;
+    verticalPosition: "lower" | "lower_middle" | "center";
     bottomOffset: number;
     maxLines: number;
     outlineStrength: number;

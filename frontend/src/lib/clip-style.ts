@@ -1,4 +1,5 @@
 import type {
+  CaptionDisplayMode,
   CandidateClip,
   ClipStyleDraft,
   ClipStyleOverrides,
@@ -25,6 +26,28 @@ function normalizeStylePreset(value: ClipStylePresetId | null | undefined): Clip
     return value;
   }
   return "clean";
+}
+
+function normalizeCaptionDisplayMode(value: CaptionDisplayMode | null | undefined): CaptionDisplayMode {
+  if (value === "word" || value === "sentence") {
+    return value;
+  }
+  return "karaoke";
+}
+
+function normalizeFontFamily(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed || "system-ui";
+}
+
+export function defaultCaptionBottomOffset(verticalPosition: ClipStyleDraft["captions"]["verticalPosition"]) {
+  if (verticalPosition === "center") {
+    return 720;
+  }
+  if (verticalPosition === "lower_middle") {
+    return 420;
+  }
+  return 300;
 }
 
 export const CLIP_STYLE_PRESET_OPTIONS: Array<{
@@ -71,7 +94,9 @@ function clipStylePresetConfig(preset: PresetConfig, candidate: CandidateClip, s
       },
       captions: {
         ...baseColors,
+        fontFamily: "system-ui",
         fontSize: 86,
+        displayMode: "karaoke",
         verticalPosition: "lower",
         bottomOffset: 284,
         maxLines: 2,
@@ -102,7 +127,9 @@ function clipStylePresetConfig(preset: PresetConfig, candidate: CandidateClip, s
       },
       captions: {
         ...baseColors,
+        fontFamily: "system-ui",
         fontSize: 92,
+        displayMode: "karaoke",
         verticalPosition: "lower_middle",
         bottomOffset: 388,
         maxLines: 2,
@@ -133,9 +160,11 @@ function clipStylePresetConfig(preset: PresetConfig, candidate: CandidateClip, s
     },
     captions: {
       ...baseColors,
+      fontFamily: "system-ui",
       fontSize: 78,
+      displayMode: "karaoke",
       verticalPosition: cleanVerticalPosition,
-      bottomOffset: cleanVerticalPosition === "lower_middle" ? 420 : 300,
+      bottomOffset: defaultCaptionBottomOffset(cleanVerticalPosition),
       maxLines: preset.caption_max_lines,
       outlineStrength: 5,
       shadowStrength: 2
@@ -170,6 +199,12 @@ export function clipStyleDraftFromOverrides(
 ): ClipStyleDraft {
   const stylePreset = normalizeStylePreset(styleOverrides?.style_preset);
   const defaults = deriveClipStyleDefaults(candidate, preset, stylePreset);
+  const verticalPosition = styleOverrides?.captions?.vertical_position ?? defaults.captions.verticalPosition;
+  const bottomOffset =
+    styleOverrides?.captions?.bottom_offset ??
+    (verticalPosition === defaults.captions.verticalPosition
+      ? defaults.captions.bottomOffset
+      : defaultCaptionBottomOffset(verticalPosition));
 
   return {
     stylePreset,
@@ -186,9 +221,11 @@ export function clipStyleDraftFromOverrides(
     captions: {
       baseColor: normalizeColor(styleOverrides?.captions?.base_color ?? defaults.captions.baseColor),
       activeWordColor: normalizeColor(styleOverrides?.captions?.active_word_color ?? defaults.captions.activeWordColor),
+      fontFamily: normalizeFontFamily(styleOverrides?.captions?.font_family ?? defaults.captions.fontFamily),
       fontSize: styleOverrides?.captions?.font_size ?? defaults.captions.fontSize,
-      verticalPosition: styleOverrides?.captions?.vertical_position ?? defaults.captions.verticalPosition,
-      bottomOffset: styleOverrides?.captions?.bottom_offset ?? defaults.captions.bottomOffset,
+      displayMode: normalizeCaptionDisplayMode(styleOverrides?.captions?.display_mode ?? defaults.captions.displayMode),
+      verticalPosition,
+      bottomOffset,
       maxLines: styleOverrides?.captions?.max_lines ?? defaults.captions.maxLines,
       outlineStrength: styleOverrides?.captions?.outline_strength ?? defaults.captions.outlineStrength,
       shadowStrength: styleOverrides?.captions?.shadow_strength ?? defaults.captions.shadowStrength
@@ -223,7 +260,9 @@ export function clipStyleDraftToOverrides(
     captions: {
       base_color: normalizeColor(draft.captions.baseColor),
       active_word_color: normalizeColor(draft.captions.activeWordColor),
+      font_family: normalizeFontFamily(draft.captions.fontFamily),
       font_size: draft.captions.fontSize,
+      display_mode: normalizeCaptionDisplayMode(draft.captions.displayMode),
       vertical_position: draft.captions.verticalPosition,
       bottom_offset: draft.captions.bottomOffset,
       max_lines: draft.captions.maxLines,

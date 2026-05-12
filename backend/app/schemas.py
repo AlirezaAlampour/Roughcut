@@ -191,7 +191,7 @@ class PresetConfig(BaseModel):
     export_mode: Literal["center_blur_fill", "vertical_9_16", "source_aspect"] = "center_blur_fill"
     caption_base_color: str = "#FFFFFF"
     caption_active_word_color: str = "#FFE15D"
-    caption_vertical_position: Literal["lower", "lower_middle"] = "lower"
+    caption_vertical_position: Literal["lower", "lower_middle", "center"] = "lower"
     caption_max_lines: int = 2
     caption_max_words_per_line: int = 4
     blur_intensity: float = 30.0
@@ -379,8 +379,10 @@ class ClipCaptionStyleOverrides(BaseModel):
 
     base_color: str | None = None
     active_word_color: str | None = None
+    font_family: str | None = None
     font_size: int | None = Field(default=None, ge=36, le=120)
-    vertical_position: Literal["lower", "lower_middle"] | None = None
+    display_mode: Literal["word", "sentence", "karaoke"] | None = None
+    vertical_position: Literal["lower", "lower_middle", "center"] | None = None
     bottom_offset: int | None = Field(default=None, ge=120, le=760)
     max_lines: int | None = Field(default=None, ge=1, le=3)
     outline_strength: float | None = Field(default=None, ge=0, le=12)
@@ -397,6 +399,14 @@ class ClipCaptionStyleOverrides(BaseModel):
         if not stripped.startswith("#") or len(stripped) != 7:
             raise ValueError("Colors must use #RRGGBB format.")
         return stripped
+
+    @field_validator("font_family")
+    @classmethod
+    def normalize_font_family(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class ClipCompositionStyleOverrides(BaseModel):
@@ -442,6 +452,7 @@ class CandidateExportRequest(BaseModel):
 
     captions_enabled: bool | None = None
     style_overrides: ClipStyleOverrides | None = None
+    subtitle_segments: list[SubtitleSegment] | None = None
 
 
 class TraceEvent(BaseModel):

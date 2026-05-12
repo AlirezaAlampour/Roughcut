@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
-import { Manrope, Newsreader } from "next/font/google";
+import { Bangers, Manrope, Montserrat, Newsreader } from "next/font/google";
 import Script from "next/script";
 import { Toaster } from "sonner";
 
@@ -15,6 +15,18 @@ const sans = Manrope({
 const serif = Newsreader({
   subsets: ["latin"],
   variable: "--font-serif"
+});
+
+const captionMontserrat = Montserrat({
+  subsets: ["latin"],
+  variable: "--font-caption-montserrat",
+  weight: ["700", "800"]
+});
+
+const captionBangers = Bangers({
+  subsets: ["latin"],
+  variable: "--font-caption-bangers",
+  weight: "400"
 });
 
 export const metadata: Metadata = {
@@ -39,7 +51,11 @@ const themeScript = `
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" className={`${sans.variable} ${serif.variable}`} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${sans.variable} ${serif.variable} ${captionMontserrat.variable} ${captionBangers.variable}`}
+      suppressHydrationWarning
+    >
       <body className="min-h-screen bg-background lg:h-screen lg:overflow-hidden">
         <Script id="roughcut-theme" strategy="beforeInteractive">
           {themeScript}

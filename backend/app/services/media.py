@@ -303,7 +303,7 @@ def _caption_word_groups(
 def _caption_group_lines(
     group: list[WordTimestamp],
     *,
-    active_index: int,
+    active_index: int | None,
     base_color: str,
     active_color: str,
     max_lines: int,
@@ -312,7 +312,7 @@ def _caption_group_lines(
     rendered: list[str] = []
     for index, word in enumerate(group):
         token = _escape_ass_text(word.word)
-        if index == active_index:
+        if active_index is not None and index == active_index:
             token = f"{{\\c{active_color}\\b1}}{token}{{\\c{base_color}\\b1}}"
         rendered.append(token)
 
@@ -336,13 +336,34 @@ def _caption_group_lines(
     return r"\N".join(" ".join(rendered[start:end]) for start, end in line_ranges if start < end)
 
 
+def _default_caption_margin_v(vertical_position: str) -> int:
+    if vertical_position == "center":
+        return 720
+    if vertical_position == "lower_middle":
+        return 420
+    return 300
+
+
+def _resolved_ass_font_name(font_family: str | None) -> str:
+    normalized = (font_family or "").strip()
+    if normalized == "Montserrat":
+        return "Montserrat"
+    if normalized == "Impact":
+        return "Impact"
+    if normalized == "Bangers":
+        return "Bangers"
+    return "Arial"
+
+
 def write_ass_karaoke(
     path: Path,
     segments: list[SubtitleSegment],
     *,
     base_color: str = "#FFFFFF",
     active_word_color: str = "#FFE15D",
+    font_family: str = "system-ui",
     font_size: int = 78,
+    display_mode: str = "karaoke",
     vertical_position: str = "lower",
     bottom_offset: int | None = None,
     max_lines: int = 2,
@@ -353,7 +374,9 @@ def write_ass_karaoke(
     base_ass_color = _ass_color(base_color, "#FFFFFF")
     active_ass_color = _ass_color(active_word_color, "#FFE15D")
     outline_color = "&H00080808&"
-    margin_v = int(bottom_offset if bottom_offset is not None else (420 if vertical_position == "lower_middle" else 300))
+    margin_v = int(bottom_offset if bottom_offset is not None else _default_caption_margin_v(vertical_position))
+    display_mode = display_mode if display_mode in {"word", "sentence", "karaoke"} else "karaoke"
+    font_name = _resolved_ass_font_name(font_family)
     font_size = max(36, min(120, int(font_size or 78)))
     margin_v = max(120, min(760, margin_v))
     max_lines = max(1, min(3, int(max_lines or 2)))
@@ -371,11 +394,35 @@ def write_ass_karaoke(
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: ShortsDefault,Arial,{font_size},{base_ass_color},{active_ass_color},{outline_color},&H85000000&,-1,0,0,0,100,100,0,0,1,{outline_strength},{shadow_strength},2,80,80,{margin_v},1",
+        f"Style: ShortsDefault,{font_name},{font_size},{base_ass_color},{active_ass_color},{outline_color},&H85000000&,-1,0,0,0,100,100,0,0,1,{outline_strength},{shadow_strength},2,80,80,{margin_v},1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
+
+    if display_mode == "sentence":
+        for segment in segments:
+            if segment.end <= segment.start:
+                continue
+            group = _derived_words_for_segment(segment)
+            text = (
+                _caption_group_lines(
+                    group,
+                    active_index=None,
+                    base_color=base_ass_color,
+                    active_color=active_ass_color,
+                    max_lines=max_lines,
+                    max_words_per_line=max_words_per_line,
+                )
+                if group
+                else _escape_ass_text(segment.text)
+            )
+            if text:
+                lines.append(
+                    f"Dialogue: 0,{_format_ass_timestamp(segment.start)},{_format_ass_timestamp(segment.end)},ShortsDefault,,0,0,0,,{{\\an2\\b1}}{text}"
+                )
+        path.write_text("\n".join(lines) + "\n")
+        return
 
     all_words: list[WordTimestamp] = []
     for segment in segments:
@@ -408,16 +455,19 @@ def write_ass_karaoke(
             if event_end_target <= event_start:
                 event_end_target = word.end
             event_end = max(event_start + 0.08, min(group_end, event_end_target))
-            text = _caption_group_lines(
-                group,
-                active_index=index,
-                base_color=base_ass_color,
-                active_color=active_ass_color,
-                max_lines=max_lines,
-                max_words_per_line=max_words_per_line,
-            )
+            if display_mode == "word":
+                dialogue_text = f"{{\\an2\\b1\\fscx105\\fscy105\\c{active_ass_color}}}{_escape_ass_text(word.word)}"
+            else:
+                dialogue_text = "{\\an2\\b1}" + _caption_group_lines(
+                    group,
+                    active_index=index,
+                    base_color=base_ass_color,
+                    active_color=active_ass_color,
+                    max_lines=max_lines,
+                    max_words_per_line=max_words_per_line,
+                )
             lines.append(
-                f"Dialogue: 0,{_format_ass_timestamp(event_start)},{_format_ass_timestamp(event_end)},ShortsDefault,,0,0,0,,{{\\an2\\b1}}{text}"
+                f"Dialogue: 0,{_format_ass_timestamp(event_start)},{_format_ass_timestamp(event_end)},ShortsDefault,,0,0,0,,{dialogue_text}"
             )
 
     path.write_text("\n".join(lines) + "\n")

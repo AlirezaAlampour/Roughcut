@@ -8,6 +8,7 @@ import type {
   ProjectDetail,
   ProjectSummary,
   SettingsResponse,
+  SubtitleSegment,
   SettingsUpdateRequest,
   UploadResponse
 } from "@/lib/types";
@@ -134,11 +135,16 @@ export const api = {
     jobId: string,
     candidateId: string,
     captionsEnabled?: boolean,
-    styleOverrides?: ClipStyleOverrides
+    styleOverrides?: ClipStyleOverrides,
+    subtitleSegments?: SubtitleSegment[]
   ) {
     return request<JobSummary>(`/api/projects/${projectId}/jobs/${jobId}/candidates/${candidateId}/export`, {
       method: "POST",
-      body: JSON.stringify({ captions_enabled: captionsEnabled, style_overrides: styleOverrides })
+      body: JSON.stringify({
+        captions_enabled: captionsEnabled,
+        style_overrides: styleOverrides,
+        subtitle_segments: subtitleSegments
+      })
     });
   },
   saveClipStyle(projectId: string, jobId: string, candidateId: string, styleOverrides?: ClipStyleOverrides) {

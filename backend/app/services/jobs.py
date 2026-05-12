@@ -136,6 +136,35 @@ def _prepare_transcript_text_file(
     return transcript_txt_path
 
 
+def _full_length_caption_candidate(
+    *,
+    transcript_segments: list[TranscriptSegment],
+    source_duration: float,
+) -> CandidateClip:
+    subtitle_segments = [
+        SubtitleSegment(
+            start=segment.start,
+            end=segment.end,
+            text=segment.text,
+            words=[word.model_copy() for word in segment.words],
+        )
+        for segment in transcript_segments
+        if segment.end > segment.start
+    ]
+    return CandidateClip(
+        id="clip-001",
+        start_sec=0.0,
+        end_sec=round(max(float(source_duration or 0), 0.2), 3),
+        transcript_excerpt=media.transcript_text(transcript_segments),
+        title="",
+        hook_text="",
+        rationale="Prepared full-length caption candidate.",
+        score_total=100,
+        tags=["quick-caption"],
+        subtitle_segments=subtitle_segments,
+    )
+
+
 def _prepare_subtitle_file(
     *,
     outputs_dir: Path,
@@ -469,143 +498,188 @@ def _process_shorts_candidate_generation_job(settings: Settings, job_id: str) ->
                 )
             storage.sync_project_manifest(conn, settings, project_id)
 
-        with connection() as conn:
-            repository.update_job_progress(
-                conn,
-                job_id,
-                current_step="segmenting",
-                progress_message="Splitting the transcript into shorts candidate windows.",
-                progress_percent=50,
-            )
+        generate_shorts = bool(job["generate_shorts"])
+        if generate_shorts:
+            with connection() as conn:
+                repository.update_job_progress(
+                    conn,
+                    job_id,
+                    current_step="segmenting",
+                    progress_message="Splitting the transcript into shorts candidate windows.",
+                    progress_percent=50,
+                )
 
-        _log_and_trace(
-            log_lines,
-            trace,
-            stage="segmentation",
-            event="started",
-            message="Splitting the transcript into shorts candidate windows.",
-            payload={
-                "target_clip_min_sec": preset.target_clip_min_sec,
-                "target_clip_max_sec": preset.target_clip_max_sec,
-                "max_candidates": preset.max_candidates,
-            },
-        )
-        candidate_windows = candidates.segment_transcript_into_candidates(
-            transcript,
-            preset=preset,
-            source_duration=float(duration),
-            aggressiveness=job["aggressiveness"],
-        )
-        _log_and_trace(
-            log_lines,
-            trace,
-            stage="segmentation",
-            event="completed",
-            message=f"Deterministic pre-segmentation produced {len(candidate_windows)} candidate windows.",
-            payload={"candidate_count": len(candidate_windows)},
-        )
-
-        with connection() as conn:
-            repository.update_job_progress(
-                conn,
-                job_id,
-                current_step="scoring",
-                progress_message=(
-                    "No candidate windows found; writing an empty candidate manifest."
-                    if not candidate_windows
-                    else "Scoring shorts candidates with the planner model."
-                ),
-                progress_percent=68,
-            )
-
-        planner_messages: list[str] = []
-        if candidate_windows:
             _log_and_trace(
                 log_lines,
                 trace,
-                stage="planner scoring",
+                stage="segmentation",
                 event="started",
-                message="Scoring shorts candidates with the planner model.",
+                message="Splitting the transcript into shorts candidate windows.",
                 payload={
-                    "candidate_count": len(candidate_windows),
-                    "llm_model": payload.get("llm_model", ""),
-                    "detailed_planner_logging": settings.enable_detailed_planner_logging,
+                    "target_clip_min_sec": preset.target_clip_min_sec,
+                    "target_clip_max_sec": preset.target_clip_max_sec,
+                    "max_candidates": preset.max_candidates,
                 },
             )
+            candidate_windows = candidates.segment_transcript_into_candidates(
+                transcript,
+                preset=preset,
+                source_duration=float(duration),
+                aggressiveness=job["aggressiveness"],
+            )
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage="segmentation",
+                event="completed",
+                message=f"Deterministic pre-segmentation produced {len(candidate_windows)} candidate windows.",
+                payload={"candidate_count": len(candidate_windows)},
+            )
+
+            with connection() as conn:
+                repository.update_job_progress(
+                    conn,
+                    job_id,
+                    current_step="scoring",
+                    progress_message=(
+                        "No candidate windows found; writing an empty candidate manifest."
+                        if not candidate_windows
+                        else "Scoring shorts candidates with the planner model."
+                    ),
+                    progress_percent=68,
+                )
+
+            planner_messages: list[str] = []
+            if candidate_windows:
+                _log_and_trace(
+                    log_lines,
+                    trace,
+                    stage="planner scoring",
+                    event="started",
+                    message="Scoring shorts candidates with the planner model.",
+                    payload={
+                        "candidate_count": len(candidate_windows),
+                        "llm_model": payload.get("llm_model", ""),
+                        "detailed_planner_logging": settings.enable_detailed_planner_logging,
+                    },
+                )
+            else:
+                trace.emit(
+                    stage="planner scoring",
+                    event="skipped",
+                    message="No candidate windows found; skipping planner scoring.",
+                    severity="warning",
+                )
+            scoring_outcome = (
+                planner.score_short_candidates(
+                    settings=settings,
+                    llm_base_url=payload.get("llm_base_url", ""),
+                    llm_model=payload.get("llm_model", ""),
+                    source_filename=source_file["name"],
+                    source_duration=float(duration),
+                    preset=preset,
+                    candidates=candidate_windows,
+                    user_notes=job["user_notes"],
+                    log_messages=planner_messages,
+                    artifact_dir=outputs_dir if settings.enable_detailed_planner_logging else None,
+                )
+                if candidate_windows
+                else planner.CandidateScoringOutcome(candidates=[])
+            )
+            scored_candidates = scoring_outcome.candidates
+            for message in planner_messages:
+                _log_and_trace(
+                    log_lines,
+                    trace,
+                    stage="planner scoring",
+                    event="message",
+                    message=message,
+                )
+            for event in scoring_outcome.trace_events:
+                _log_and_trace(
+                    log_lines,
+                    trace,
+                    stage=event.stage,
+                    event=event.event,
+                    message=event.message,
+                    severity=event.severity,
+                    payload=event.payload,
+                )
+            if candidate_windows:
+                trace.emit(
+                    stage="planner scoring",
+                    event="completed",
+                    message=f"Planner scoring returned {len(scored_candidates)} ranked candidates.",
+                    payload={
+                        "candidate_count": len(scored_candidates),
+                        "planner_prompt_artifact": "planner-prompt.txt"
+                        if settings.enable_detailed_planner_logging and (outputs_dir / "planner-prompt.txt").exists()
+                        else None,
+                        "planner_response_artifact": (
+                            "planner-response.json"
+                            if (outputs_dir / "planner-response.json").exists()
+                            else ("planner-response.txt" if (outputs_dir / "planner-response.txt").exists() else None)
+                        ),
+                    },
+                )
         else:
-            trace.emit(
+            with connection() as conn:
+                repository.update_job_progress(
+                    conn,
+                    job_id,
+                    current_step="writing",
+                    progress_message="Preparing one full-length caption candidate.",
+                    progress_percent=68,
+                )
+
+            _log_and_trace(
+                log_lines,
+                trace,
+                stage="segmentation",
+                event="skipped",
+                message="Quick caption mode skips shorts window segmentation.",
+                payload={"generate_shorts": False},
+            )
+            _log_and_trace(
+                log_lines,
+                trace,
                 stage="planner scoring",
                 event="skipped",
-                message="No candidate windows found; skipping planner scoring.",
-                severity="warning",
+                message="Quick caption mode skips planner scoring and uses the full source as one candidate.",
+                payload={"generate_shorts": False},
             )
-        scoring_outcome = (
-            planner.score_short_candidates(
-                settings=settings,
-                llm_base_url=payload.get("llm_base_url", ""),
-                llm_model=payload.get("llm_model", ""),
-                source_filename=source_file["name"],
-                source_duration=float(duration),
-                preset=preset,
-                candidates=candidate_windows,
-                user_notes=job["user_notes"],
-                log_messages=planner_messages,
-                artifact_dir=outputs_dir if settings.enable_detailed_planner_logging else None,
-            )
-            if candidate_windows
-            else planner.CandidateScoringOutcome(candidates=[])
-        )
-        scored_candidates = scoring_outcome.candidates
-        for message in planner_messages:
-            _log_and_trace(
-                log_lines,
-                trace,
-                stage="planner scoring",
-                event="message",
-                message=message,
-            )
-        for event in scoring_outcome.trace_events:
-            _log_and_trace(
-                log_lines,
-                trace,
-                stage=event.stage,
-                event=event.event,
-                message=event.message,
-                severity=event.severity,
-                payload=event.payload,
-            )
-        if candidate_windows:
-            trace.emit(
-                stage="planner scoring",
-                event="completed",
-                message=f"Planner scoring returned {len(scored_candidates)} ranked candidates.",
-                payload={
-                    "candidate_count": len(scored_candidates),
-                    "planner_prompt_artifact": "planner-prompt.txt"
-                    if settings.enable_detailed_planner_logging and (outputs_dir / "planner-prompt.txt").exists()
-                    else None,
-                    "planner_response_artifact": (
-                        "planner-response.json"
-                        if (outputs_dir / "planner-response.json").exists()
-                        else ("planner-response.txt" if (outputs_dir / "planner-response.txt").exists() else None)
-                    ),
-                },
-            )
+            scored_candidates = [
+                _full_length_caption_candidate(
+                    transcript_segments=transcript.segments,
+                    source_duration=float(duration),
+                )
+            ]
+            scoring_outcome = planner.CandidateScoringOutcome(candidates=scored_candidates)
 
         with connection() as conn:
             repository.update_job_progress(
                 conn,
                 job_id,
                 current_step="writing",
-                progress_message="Writing the ranked shorts candidate manifest.",
+                progress_message=(
+                    "Writing the full-length caption candidate manifest."
+                    if not generate_shorts
+                    else "Writing the ranked shorts candidate manifest."
+                ),
                 progress_percent=88,
             )
 
         notes_for_user: list[str] = []
         if not transcript.segments:
-            notes_for_user.append("No speech was detected, so Roughcut could not generate shorts candidates.")
+            notes_for_user.append(
+                "No speech was detected, so the quick caption candidate is ready but may not contain subtitle segments."
+                if not generate_shorts
+                else "No speech was detected, so Roughcut could not generate shorts candidates."
+            )
         elif not scored_candidates:
             notes_for_user.append("No usable shorts candidate windows were found in the transcript.")
+        elif not generate_shorts:
+            notes_for_user.append("Prepared one full-length caption candidate for direct styling.")
         else:
             notes_for_user.extend(scoring_outcome.notes_for_user)
             notes_for_user.append(f"Generated and ranked {len(scored_candidates)} shorts candidates.")
@@ -753,9 +827,15 @@ def _write_candidate_subtitles(
         active_word_color=style_overrides.captions.active_word_color
         if style_overrides and style_overrides.captions and style_overrides.captions.active_word_color
         else preset.caption_active_word_color,
+        font_family=style_overrides.captions.font_family
+        if style_overrides and style_overrides.captions and style_overrides.captions.font_family
+        else "system-ui",
         font_size=style_overrides.captions.font_size
         if style_overrides and style_overrides.captions and style_overrides.captions.font_size is not None
         else 78,
+        display_mode=style_overrides.captions.display_mode
+        if style_overrides and style_overrides.captions and style_overrides.captions.display_mode
+        else "karaoke",
         vertical_position=style_overrides.captions.vertical_position
         if style_overrides and style_overrides.captions and style_overrides.captions.vertical_position
         else preset.caption_vertical_position,
